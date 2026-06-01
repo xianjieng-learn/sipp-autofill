@@ -12,20 +12,48 @@ Auto-fill form SIPP (Data Anak, Posita, Petitum) dari hasil ekstraksi PTSP Helpe
 
 ## Cara Install
 
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/xianjieng-learn/sipp-autofill.git
+cd sipp-autofill
+```
+
+Atau download ZIP dari GitHub: https://github.com/xianjieng-learn/sipp-autofill/archive/refs/heads/main.zip
+
+### 2. Install ke Chrome
+
 1. Buka Chrome, ketik `chrome://extensions` di address bar
 2. Aktifkan **Developer mode** (toggle di pojok kanan atas)
 3. Klik **Load unpacked**
 4. Pilih folder `sipp-autofill` ini
 5. Extension akan muncul di toolbar Chrome
 
+### 3. Pin Extension (Optional)
+
+Klik icon puzzle piece (🧩) di toolbar Chrome → cari "SIPP AutoFill" → klik pin (📌) supaya selalu terlihat.
+
 ## Cara Pakai
 
-1. Upload dokumen gugatan ke **PTSP Helper**
-2. Klik tombol **"Copy JSON"** di PTSP Helper
-3. Buka halaman SIPP di eCourt
-4. Klik icon extension di toolbar Chrome
-5. Klik **"📋 Paste"** untuk paste data dari clipboard
-6. Klik **"⚡ Fill Semua ke SIPP"** untuk mengisi form
+### Step 1: Export dari PTSP Helper
+
+1. Buka **PTSP Helper** (Streamlit Cloud atau local)
+2. Upload dokumen gugatan/permohonan
+3. Tunggu proses ekstraksi selesai
+4. Klik tab **"Posita & Petitum"**
+5. Scroll ke bawah, klik tombol **"📋 Copy JSON (SIPP AutoFill)"**
+6. Data akan ter-copy ke clipboard
+
+### Step 2: Fill ke SIPP
+
+1. Buka halaman **SIPP** di eCourt
+2. Buka form yang mau di-fill (misal: "Tambah Anak")
+3. Klik icon **SIPP AutoFill** di toolbar Chrome
+4. Klik tombol **"📋 Paste"** — data akan ter-parse otomatis
+5. Kalau ada beberapa anak, pilih anak yang mau di-fill
+6. Klik tombol **"⚡ Fill Semua ke SIPP"**
+7. **Verify** field yang terisi, lalu klik **Simpan**
+8. Ulangi untuk anak berikutnya (kalau ada)
 
 ## Data yang Di-fill
 
