@@ -245,23 +245,68 @@ async function fillAllSipp() {
     }
 
     // Send data to content script
+    // Send data to content script
     const response = await chrome.tabs.sendMessage(tab.id, {
       action: 'fillAllSipp',
       data: parsedData,
     });
-
-    if (response && response.success) {
-      const filledCount = response.filledFields || 0;
-      showStatus(`✅ Berhasil mengisi ${filledCount} field di SIPP!`, 'success');
-    } else {
-      showStatus(`⚠️ ${response?.error || 'Gagal mengisi form SIPP'}`, 'error');
-    }
+    renderFillResult(response);
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
   }
 
   btnFillAll.disabled = false;
   btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
+}
+
+// ─── Render fill results with details ───
+function renderFillResult(response) {
+  if (!response) {
+    showStatus('❌ Tidak ada response dari halaman SIPP', 'error');
+    return;
+  }
+
+  const filledCount = response.filledFields || 0;
+  const errors = response.errors || [];
+  
+  if (filledCount > 0 && errors.length === 0) {
+    // All success
+    showStatus(`✅ Berhasil mengisi ${filledCount} field! Semua OK.`, 'success');
+  } else if (filledCount > 0 && errors.length > 0) {
+    // Partial success
+    showStatus(`⚠️ ${filledCount} field berhasil, ${errors.length} gagal. Lihat detail di bawah.`, 'info');
+    renderErrorDetails(errors);
+  } else if (errors.length > 0) {
+    // All failed
+    showStatus(`❌ Semua field gagal diisi. Lihat detail di bawah.`, 'error');
+    renderErrorDetails(errors);
+  } else {
+    showStatus(`⚠️ ${response?.error || 'Gagal mengisi form SIPP'}`, 'error');
+  }
+}
+
+// ─── Render error details ───
+function renderErrorDetails(errors) {
+  // Remove existing error details
+  const existing = document.getElementById('errorDetails');
+  if (existing) existing.remove();
+  
+  const div = document.createElement('div');
+  div.id = 'errorDetails';
+  div.style.cssText = 'margin-top: 8px; padding: 8px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; font-size: 10px; max-height: 150px; overflow-y: auto;';
+  
+  let html = '<div style="font-weight: 600; margin-bottom: 4px; color: #856404;">⚠️ Field yang gagal:</div>';
+  
+  errors.forEach(err => {
+    html += `<div style="padding: 2px 0; color: #856404; border-bottom: 1px solid #ffeeba;">• ${err}</div>`;
+  });
+  
+  html += '<div style="margin-top: 6px; font-size: 9px; color: #856404;">💡 Tips: Pastikan form SIPP sedang terbuka dan field ada di halaman.</div>';
+  
+  div.innerHTML = html;
+  
+  // Insert after status element
+  statusEl.parentNode.insertBefore(div, statusEl.nextSibling);
 }
 
 // ─── Event listeners ───
