@@ -156,29 +156,28 @@ function fillTextArea(type, data) {
     return { success: false, error: `Tidak ada data ${type.toUpperCase()}` };
   }
 
-  // Strategy 0: Direct ID lookup (matches actual SIPP HTML: id="posita" / id="petitum")
+  // Priority 1: CKEditor API (SIPP wraps textarea with CKEditor)
+  // CKEditor manages its own state — setting hidden textarea value does NOT update the editor
+  if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances[type]) {
+    try {
+      CKEDITOR.instances[type].setData(text);
+      // Also sync to hidden textarea for form submission
+      const ta = document.getElementById(type);
+      if (ta) { ta.value = text; }
+      return { success: true, filledFields: 1 };
+    } catch (e) {
+      console.error(`CKEditor setData failed for ${type}:`, e);
+    }
+  }
+
+  // Priority 2: Direct textarea (no CKEditor)
   const textarea = document.getElementById(type);
   if (textarea && textarea.tagName === 'TEXTAREA') {
     setTextAreaValue(textarea, text);
     return { success: true, filledFields: 1 };
   }
 
-  // Strategy 1: Try CKEditor API by instance name directly
-  if (typeof CKEDITOR !== 'undefined') {
-    const editor = CKEDITOR.instances[type];
-    if (editor) {
-      editor.setData(text);
-      // Sync back to hidden textarea for form submission
-      const hiddenTextarea = document.getElementById(type);
-      if (hiddenTextarea) {
-        hiddenTextarea.value = text;
-        hiddenTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      return { success: true, filledFields: 1 };
-    }
-  }
-
-  // Strategy 2: Find textarea by name or id attributes
+  // Priority 3: Query by name/id attributes
   const namePatterns = type === 'posita' 
     ? ['posita', 'dalil', 'alasan'] 
     : ['petitum', 'tuntutan', 'amar'];
@@ -193,7 +192,7 @@ function fillTextArea(type, data) {
     }
   }
 
-  // Strategy 3: Nearby text matching (fallback)
+  // Priority 4: Nearby text matching (fallback)
   const textareas = document.querySelectorAll('textarea');
   for (const ta of textareas) {
     const nearbyText = getNearbyText(ta).toLowerCase();
