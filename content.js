@@ -1,11 +1,18 @@
 /**
  * SIPP AutoFill - Content Script
- * Injected into ecourt.mahkamahagung.go.id pages.
+ * Injected into SIPP pages (http://25.24.23.7/SIPP/...).
  * Handles SIPP forms:
- *   1. Input Data Anak
- *   2. Posita
- *   3. Petitum
- *   4. Obyek Sengketa Gugatan
+ *   1. Input Data Anak (separate popup)
+ *   2. Posita (CKEditor)
+ *   3. Petitum (CKEditor)
+ *   4. Obyek Sengketa Gugatan (plain textarea)
+ *
+ * Actual SIPP HTML structure:
+ *   - Form: #frm_data_umum (inside #popup_form > #form_pop)
+ *   - Obyek Sengketa: <textarea id="obyek_gugatan" name="obyek_gugatan"> — plain textarea
+ *   - Posita: <textarea id="posita" name="posita"> — hidden, wrapped by CKEditor (#cke_posita)
+ *   - Petitum: <textarea id="petitum" name="petitum"> — hidden, wrapped by CKEditor (#cke_petitum)
+ *   - Data Anak: separate popup (loaded via popup_form())
  */
 
 // Listen for messages from popup
@@ -137,6 +144,11 @@ function inferAnakKe() {
 
 /**
  * Fill Posita or Petitum textarea.
+ *
+ * Strategy 0: Direct ID lookup (SIPP uses id="posita" / id="petitum")
+ * Strategy 1: CKEditor instance by name
+ * Strategy 2: Query by name/id attributes
+ * Strategy 3: Nearby text matching (fallback)
  */
 function fillTextArea(type, data) {
   const text = type === 'posita' ? data.posita : data.petitum;
@@ -144,34 +156,50 @@ function fillTextArea(type, data) {
     return { success: false, error: `Tidak ada data ${type.toUpperCase()}` };
   }
 
-  // Find textarea elements
-  const textareas = document.querySelectorAll('textarea');
-  
-  for (const textarea of textareas) {
-    const nearbyText = getNearbyText(textarea).toLowerCase();
-    
-    if (type === 'posita' && nearbyText.includes('posita')) {
-      setTextAreaValue(textarea, text);
-      return { success: true, filledFields: 1 };
-    }
-    
-    if (type === 'petitum' && nearbyText.includes('petitum')) {
-      setTextAreaValue(textarea, text);
+  // Strategy 0: Direct ID lookup (matches actual SIPP HTML: id="posita" / id="petitum")
+  const textarea = document.getElementById(type);
+  if (textarea && textarea.tagName === 'TEXTAREA') {
+    setTextAreaValue(textarea, text);
+    return { success: true, filledFields: 1 };
+  }
+
+  // Strategy 1: Try CKEditor API by instance name directly
+  if (typeof CKEDITOR !== 'undefined') {
+    const editor = CKEDITOR.instances[type];
+    if (editor) {
+      editor.setData(text);
+      // Sync back to hidden textarea for form submission
+      const hiddenTextarea = document.getElementById(type);
+      if (hiddenTextarea) {
+        hiddenTextarea.value = text;
+        hiddenTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       return { success: true, filledFields: 1 };
     }
   }
 
-  // Try by name or id
+  // Strategy 2: Find textarea by name or id attributes
   const namePatterns = type === 'posita' 
     ? ['posita', 'dalil', 'alasan'] 
     : ['petitum', 'tuntutan', 'amar'];
   
   for (const pattern of namePatterns) {
-    const textarea = document.querySelector(
+    const el = document.querySelector(
       `textarea[name*="${pattern}" i], textarea[id*="${pattern}" i]`
     );
-    if (textarea) {
-      setTextAreaValue(textarea, text);
+    if (el) {
+      setTextAreaValue(el, text);
+      return { success: true, filledFields: 1 };
+    }
+  }
+
+  // Strategy 3: Nearby text matching (fallback)
+  const textareas = document.querySelectorAll('textarea');
+  for (const ta of textareas) {
+    const nearbyText = getNearbyText(ta).toLowerCase();
+    if ((type === 'posita' && nearbyText.includes('posita')) ||
+        (type === 'petitum' && nearbyText.includes('petitum'))) {
+      setTextAreaValue(ta, text);
       return { success: true, filledFields: 1 };
     }
   }
@@ -181,14 +209,33 @@ function fillTextArea(type, data) {
 
 /**
  * Fill Obyek Sengketa Gugatan with "-"
+ *
+ * The actual field is: <textarea id="obyek_gugatan" name="obyek_gugatan">
+ * It's a plain textarea, NOT CKEditor.
  */
 function fillObyekSengketa() {
-  const success = fillTextInput(['Obyek Sengketa', 'Objek Sengketa', 'Obyek', 'Objek'], '-');
-  
+  const value = '-';
+
+  // Direct ID lookup (matches actual SIPP HTML)
+  const textarea = document.getElementById('obyek_gugatan');
+  if (textarea && textarea.tagName === 'TEXTAREA') {
+    setTextAreaValue(textarea, value);
+    return { success: true, filledFields: 1 };
+  }
+
+  // Fallback: try by name attribute
+  const byName = document.querySelector('textarea[name="obyek_gugatan"]');
+  if (byName) {
+    setTextAreaValue(byName, value);
+    return { success: true, filledFields: 1 };
+  }
+
+  // Fallback: label text matching
+  const success = fillTextInput(['Obyek Sengketa', 'Objek Sengketa', 'Obyek', 'Objek'], value);
   if (success) {
     return { success: true, filledFields: 1 };
   }
-  
+
   return { success: false, error: 'Field Obyek Sengketa tidak ditemukan' };
 }
 
@@ -451,7 +498,7 @@ function setInputValue(input, value) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
   input.dispatchEvent(new Event('blur', { bubbles: true }));
   
-  // Trigger jQuery events if available (SIPP uses jQuery)
+  // Trigger jQuery events if available (SIPP uses jQuery 1.8.2)
   if (typeof jQuery !== 'undefined' || typeof $ !== 'undefined') {
     try {
       const jq = jQuery || $;
@@ -469,6 +516,13 @@ function setInputValue(input, value) {
 /**
  * Set textarea value and trigger events.
  * Also handles CKEditor instances — SIPP uses CKEditor for Posita/Petitum.
+ *
+ * CKEditor instance names match the textarea ID:
+ *   - CKEDITOR.instances['posita']  → for <textarea id="posita">
+ *   - CKEDITOR.instances['petitum'] → for <textarea id="petitum">
+ *
+ * The actual <textarea> is hidden (visibility:hidden; display:none)
+ * and CKEditor renders its own UI in a <div id="cke_posita"> wrapper.
  */
 function setTextAreaValue(textarea, value) {
   // Strategy 1: If CKEditor is present, use its API (SIPP uses CKEditor for rich text)
@@ -481,47 +535,9 @@ function setTextAreaValue(textarea, value) {
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
-    // Try to find CKEditor instance by name iteration
-    for (const instanceName in CKEDITOR.instances) {
-      const inst = CKEDITOR.instances[instanceName];
-      if (inst.element && inst.element.getAttribute('id') === textarea.id) {
-        inst.setData(value);
-        textarea.value = value;
-        textarea.dispatchEvent(new Event('change', { bubbles: true }));
-        return;
-      }
-    }
   }
 
-  // Strategy 2: CKEditor with iframe — find editor by class and use API
-  if (typeof CKEDITOR !== 'undefined') {
-    const allInstances = Object.keys(CKEDITOR.instances);
-    if (allInstances.length > 0) {
-      // Use first available CKEditor instance if textarea is near a CKEditor
-      const parentTd = textarea.closest('td');
-      if (parentTd) {
-        const ckeDiv = parentTd.querySelector('.cke');
-        if (ckeDiv) {
-          for (const instanceName in CKEDITOR.instances) {
-            const inst = CKEDITOR.instances[instanceName];
-            if (inst.element && inst.element.$.closest('td') === parentTd) {
-              inst.setData(value);
-              textarea.value = value;
-              textarea.dispatchEvent(new Event('change', { bubbles: true }));
-              return;
-            }
-          }
-          // Fallback: use first instance
-          CKEDITOR.instances[allInstances[0]].setData(value);
-          textarea.value = value;
-          textarea.dispatchEvent(new Event('change', { bubbles: true }));
-          return;
-        }
-      }
-    }
-  }
-
-  // Strategy 3: Plain textarea (no CKEditor)
+  // Strategy 2: Plain textarea (no CKEditor) — use native setter + events
   textarea.focus();
   textarea.value = '';
   
