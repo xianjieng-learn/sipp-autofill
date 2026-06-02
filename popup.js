@@ -413,17 +413,25 @@ async function fillSippMainWorld(data) {
 
   function setSelect(sel, value) {
     if (!sel) return false;
-    // Normalize: remove extra spaces for flexible matching
     const normalize = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-    const normalizeNoSpace = s => s.toLowerCase().replace(/\s+/g, '');
+    const removeSpaces = s => s.toLowerCase().replace(/\s+/g, '');
     const v = normalize(value);
-    const vNoSpace = normalizeNoSpace(value);
-    const opt = Array.from(sel.options).find(o => {
+
+    // Strategy 1: normal match (with spaces)
+    let opt = Array.from(sel.options).find(o => {
       const t = normalize(o.text);
-      const tNoSpace = normalizeNoSpace(o.text);
-      return t === v || t.includes(v) || v.includes(t) ||
-             tNoSpace === vNoSpace || tNoSpace.includes(vNoSpace) || vNoSpace.includes(tNoSpace);
+      return t === v || t.includes(v) || v.includes(t);
     });
+
+    // Strategy 2: no-space fallback (for "Kedung Tuban" vs "Kedungtuban")
+    if (!opt) {
+      const vNoSpace = removeSpaces(value);
+      opt = Array.from(sel.options).find(o => {
+        const tNoSpace = removeSpaces(o.text);
+        return tNoSpace === vNoSpace || tNoSpace.includes(vNoSpace) || vNoSpace.includes(tNoSpace);
+      });
+    }
+
     if (!opt) return false;
     if (typeof jQuery !== 'undefined' && jQuery(sel).data('select2')) {
       jQuery(sel).val(opt.value).trigger('change').trigger('select2:select');
