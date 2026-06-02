@@ -246,12 +246,27 @@ async function fillAllSipp() {
       return;
     }
 
-    // Send data to content script
-    // Send data to content script
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'fillAllSipp',
-      data: parsedData,
-    });
+    // Send data to content script, with auto-inject fallback
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'fillAllSipp',
+        data: parsedData,
+      });
+    } catch (sendErr) {
+      // Content script not injected yet — inject it programmatically, then retry
+      showStatus('⏳ Injecting content script...', 'info');
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js'],
+      });
+      // Small delay for script to initialize
+      await new Promise(r => setTimeout(r, 200));
+      response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'fillAllSipp',
+        data: parsedData,
+      });
+    }
     renderFillResult(response);
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
