@@ -427,6 +427,7 @@ function getNearbyText(element) {
 
 /**
  * Set input value and trigger events for frameworks.
+ * Also triggers jQuery events since SIPP uses jQuery.
  */
 function setInputValue(input, value) {
   input.focus();
@@ -445,9 +446,18 @@ function setInputValue(input, value) {
     input.value = value;
   }
   
+  // Dispatch standard DOM events
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
   input.dispatchEvent(new Event('blur', { bubbles: true }));
+  
+  // Trigger jQuery events if available (SIPP uses jQuery)
+  if (typeof jQuery !== 'undefined' || typeof $ !== 'undefined') {
+    try {
+      const jq = jQuery || $;
+      jq(input).val(value).trigger('input').trigger('change').trigger('blur');
+    } catch (e) { /* ignore jQuery errors */ }
+  }
   
   if (input.value !== value) {
     input.value = value;
