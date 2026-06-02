@@ -350,6 +350,36 @@ if (jsonInput.value.trim()) {
 function fillSippMainWorld(data) {
   const result = { filledFields: 0, errors: [] };
 
+  // Convert plain text posita/petitum to HTML for CKEditor
+  function textToHtml(text) {
+    if (!text) return '';
+    // Already has HTML tags? Return as-is
+    if (/<[a-z][\s\S]*>/i.test(text)) return text;
+    // Convert plain text with numbered list to HTML
+    const lines = text.split(/\r?\n/);
+    let html = '';
+    let inOl = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (inOl) { html += '</ol>'; inOl = false; }
+        html += '<p>&nbsp;</p>';
+        continue;
+      }
+      // Numbered item: "1." "2." etc.
+      const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
+      if (numMatch) {
+        if (!inOl) { html += '<ol>'; inOl = true; }
+        html += `<li>${numMatch[2]}</li>`;
+      } else {
+        if (inOl) { html += '</ol>'; inOl = false; }
+        html += `<p>${trimmed}</p>`;
+      }
+    }
+    if (inOl) html += '</ol>';
+    return html;
+  }
+
   function setVal(el, value) {
     if (!el) return false;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
@@ -385,9 +415,10 @@ function fillSippMainWorld(data) {
   // Fill Posita (CKEditor)
   if (data.posita && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['posita']) {
     try {
-      CKEDITOR.instances['posita'].setData(data.posita);
+      const html = textToHtml(data.posita);
+      CKEDITOR.instances['posita'].setData(html);
       const ta = document.getElementById('posita');
-      if (ta) ta.value = data.posita;
+      if (ta) ta.value = html;
       result.filledFields++;
     } catch(e) { result.errors.push('Posita: ' + e.message); }
   } else if (data.posita) {
@@ -397,9 +428,10 @@ function fillSippMainWorld(data) {
   // Fill Petitum (CKEditor)
   if (data.petitum && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
     try {
-      CKEDITOR.instances['petitum'].setData(data.petitum);
+      const html = textToHtml(data.petitum);
+      CKEDITOR.instances['petitum'].setData(html);
       const ta = document.getElementById('petitum');
-      if (ta) ta.value = data.petitum;
+      if (ta) ta.value = html;
       result.filledFields++;
     } catch(e) { result.errors.push('Petitum: ' + e.message); }
   } else if (data.petitum) {
