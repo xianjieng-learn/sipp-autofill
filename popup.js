@@ -246,25 +246,15 @@ async function fillAllSipp() {
       return;
     }
 
-    // Send data to content script, with auto-inject fallback
-    let response;
-    try {
-      response = await chrome.tabs.sendMessage(tab.id, {
-        action: 'fillAllSipp',
-        data: parsedData,
-      });
-    } catch (sendErr) {
-      // Content script not in MAIN world — CKEDITOR not accessible from isolated world
-      // Inject fill logic directly into MAIN world
-      showStatus('⏳ Injecting into page...', 'info');
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',
-        func: fillSippMainWorld,
-        args: [parsedData],
-      });
-      response = results?.[0]?.result || { success: false, error: 'No result from injection' };
-    }
+    // Always inject into MAIN world for fill — content script (isolated world) can't access CKEDITOR
+    showStatus('⏳ Mengisi form SIPP...', 'info');
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: fillSippMainWorld,
+      args: [parsedData],
+    });
+    const response = results?.[0]?.result || { success: false, error: 'No result from injection' };
     renderFillResult(response);
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
