@@ -347,7 +347,7 @@ if (jsonInput.value.trim()) {
 // ─── MAIN World Fill Function ───
 // This function is injected into the page's MAIN world via chrome.scripting.executeScript
 // so it can access CKEDITOR, jQuery, and other page-level variables.
-function fillSippMainWorld(data) {
+async function fillSippMainWorld(data) {
   const result = { filledFields: 0, errors: [] };
 
   // Convert plain text posita/petitum to HTML for CKEditor
@@ -420,29 +420,45 @@ function fillSippMainWorld(data) {
   }
 
   // Fill Posita (CKEditor)
-  if (data.posita && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['posita']) {
-    try {
-      const html = textToHtml(data.posita);
-      CKEDITOR.instances['posita'].setData(html);
-      const ta = document.getElementById('posita');
-      if (ta) ta.value = html;
-      result.filledFields++;
-    } catch(e) { result.errors.push('Posita: ' + e.message); }
-  } else if (data.posita) {
-    result.errors.push('Posita: CKEditor tidak ditemukan');
+  if (data.posita) {
+    let filled = false;
+    // Try up to 3 times with delay (CKEditor might not be initialized yet)
+    for (let attempt = 0; attempt < 3 && !filled; attempt++) {
+      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['posita']) {
+        try {
+          const html = textToHtml(data.posita);
+          CKEDITOR.instances['posita'].setData(html);
+          const ta = document.getElementById('posita');
+          if (ta) ta.value = html;
+          result.filledFields++;
+          filled = true;
+        } catch(e) { result.errors.push('Posita: ' + e.message); filled = true; }
+      } else {
+        // Wait 300ms for CKEditor to initialize
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    if (!filled) result.errors.push('Posita: CKEditor tidak ditemukan');
   }
 
   // Fill Petitum (CKEditor)
-  if (data.petitum && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
-    try {
-      const html = textToHtml(data.petitum);
-      CKEDITOR.instances['petitum'].setData(html);
-      const ta = document.getElementById('petitum');
-      if (ta) ta.value = html;
-      result.filledFields++;
-    } catch(e) { result.errors.push('Petitum: ' + e.message); }
-  } else if (data.petitum) {
-    result.errors.push('Petitum: CKEditor tidak ditemukan');
+  if (data.petitum) {
+    let filled = false;
+    for (let attempt = 0; attempt < 3 && !filled; attempt++) {
+      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
+        try {
+          const html = textToHtml(data.petitum);
+          CKEDITOR.instances['petitum'].setData(html);
+          const ta = document.getElementById('petitum');
+          if (ta) ta.value = html;
+          result.filledFields++;
+          filled = true;
+        } catch(e) { result.errors.push('Petitum: ' + e.message); filled = true; }
+      } else {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    if (!filled) result.errors.push('Petitum: CKEditor tidak ditemukan');
   }
 
   // Fill Obyek Sengketa (plain textarea)
