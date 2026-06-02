@@ -461,14 +461,26 @@ async function fillSippMainWorld(data) {
     for (const [id, val] of marriageFields) {
       if (!val) continue;
       const el = document.getElementById(id);
-      if (el) { setVal(el, val); result.filledFields++; }
+      if (el) {
+        setVal(el, val);
+        result.filledFields++;
+        console.log(`[SIPP] Set ${id} = "${val}" (el.value="${el.value}")`);
+      } else {
+        console.warn(`[SIPP] Element #${id} NOT FOUND`);
+      }
     }
   }
 
   // Fill Tanggal Surat
   if (data.tanggal_surat) {
     const el = document.getElementById('tgl_surat');
-    if (el) { setVal(el, data.tanggal_surat); result.filledFields++; }
+    if (el) {
+      setVal(el, data.tanggal_surat);
+      result.filledFields++;
+      console.log(`[SIPP] Set tgl_surat = "${data.tanggal_surat}" (el.value="${el.value}")`);
+    } else {
+      console.warn('[SIPP] Element #tgl_surat NOT FOUND');
+    }
   }
 
   // Fill children (Data Anak — might be in separate popup)
