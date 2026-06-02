@@ -254,28 +254,16 @@ async function fillAllSipp() {
         data: parsedData,
       });
     } catch (sendErr) {
-      // Content script not injected yet — inject via executeScript with func (more reliable than files)
-      showStatus('⏳ Injecting content script...', 'info');
-      try {
-        // Inject the content.js file
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['content.js'],
-        });
-      } catch (injectErr) {
-        // If file injection fails, try injecting inline
-        console.warn('File injection failed, trying inline:', injectErr);
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => { /* content script marker */ },
-        });
-      }
-      // Wait for script to initialize
-      await new Promise(r => setTimeout(r, 500));
-      response = await chrome.tabs.sendMessage(tab.id, {
-        action: 'fillAllSipp',
-        data: parsedData,
+      // Content script not in MAIN world — CKEDITOR not accessible from isolated world
+      // Inject fill logic directly into MAIN world
+      showStatus('⏳ Injecting into page...', 'info');
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: fillSippMainWorld,
+        args: [parsedData],
       });
+      response = results?.[0]?.result || { success: false, error: 'No result from injection' };
     }
     renderFillResult(response);
   } catch (e) {
@@ -354,4 +342,103 @@ btnFillAll.addEventListener('click', fillAllSipp);
 // Auto-parse if there's content
 if (jsonInput.value.trim()) {
   parseJSON();
+}
+
+// ─── MAIN World Fill Function ───
+// This function is injected into the page's MAIN world via chrome.scripting.executeScript
+// so it can access CKEDITOR, jQuery, and other page-level variables.
+function fillSippMainWorld(data) {
+  const result = { filledFields: 0, errors: [] };
+
+  function setVal(el, value) {
+    if (!el) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+      || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    if (setter) setter.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(el).val(value).trigger('input').trigger('change').trigger('blur'); } catch(e) {}
+    }
+    return true;
+  }
+
+  function setSelect(sel, value) {
+    if (!sel) return false;
+    const v = value.toLowerCase();
+    const opt = Array.from(sel.options).find(o =>
+      o.text.toLowerCase() === v || o.value.toLowerCase() === v ||
+      o.text.toLowerCase().includes(v) || v.includes(o.text.toLowerCase())
+    );
+    if (!opt) return false;
+    if (typeof jQuery !== 'undefined' && jQuery(sel).data('select2')) {
+      jQuery(sel).val(opt.value).trigger('change').trigger('select2:select');
+    } else {
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return true;
+  }
+
+  // Fill Posita (CKEditor)
+  if (data.posita && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['posita']) {
+    try {
+      CKEDITOR.instances['posita'].setData(data.posita);
+      const ta = document.getElementById('posita');
+      if (ta) ta.value = data.posita;
+      result.filledFields++;
+    } catch(e) { result.errors.push('Posita: ' + e.message); }
+  } else if (data.posita) {
+    result.errors.push('Posita: CKEditor tidak ditemukan');
+  }
+
+  // Fill Petitum (CKEditor)
+  if (data.petitum && typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
+    try {
+      CKEDITOR.instances['petitum'].setData(data.petitum);
+      const ta = document.getElementById('petitum');
+      if (ta) ta.value = data.petitum;
+      result.filledFields++;
+    } catch(e) { result.errors.push('Petitum: ' + e.message); }
+  } else if (data.petitum) {
+    result.errors.push('Petitum: CKEditor tidak ditemukan');
+  }
+
+  // Fill Obyek Sengketa (plain textarea)
+  if (data.obyek_sengketa) {
+    const ta = document.getElementById('obyek_gugatan');
+    if (ta) { setVal(ta, data.obyek_sengketa); result.filledFields++; }
+    else result.errors.push('Obyek Sengketa: tidak ditemukan');
+  }
+
+  // Fill children (Data Anak — might be in separate popup)
+  if (data.children && Array.isArray(data.children)) {
+    for (const child of data.children) {
+      const fields = [
+        ['nama', child.nama, ['input[name*="nama" i]', 'input[id*="nama" i]']],
+        ['tempat_lahir', child.tempat_lahir, ['input[name*="tempat" i]', 'input[id*="tempat" i]']],
+        ['tanggal_lahir', child.tanggal_lahir, ['input[name*="tanggal" i]', 'input[id*="tanggal" i]']],
+      ];
+      for (const [key, val, sels] of fields) {
+        if (!val) continue;
+        for (const sel of sels) {
+          const el = document.querySelector(sel);
+          if (el) { setVal(el, val); result.filledFields++; break; }
+        }
+      }
+      // Dropdowns
+      if (child.jenis_kelamin) {
+        const sels = ['select[name*="kelamin" i]', 'select[id*="kelamin" i]'];
+        for (const s of sels) {
+          const el = document.querySelector(s);
+          if (setSelect(el, child.jenis_kelamin)) { result.filledFields++; break; }
+        }
+      }
+    }
+  }
+
+  result.success = result.filledFields > 0;
+  return result;
 }
