@@ -248,14 +248,19 @@ async function fillAllSipp() {
 
     // Always inject into MAIN world for fill — content script (isolated world) can't access CKEDITOR
     showStatus('⏳ Mengisi form SIPP...', 'info');
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: fillSippMainWorld,
-      args: [parsedData],
-    });
-    const response = results?.[0]?.result || { success: false, error: 'No result from injection' };
-    renderFillResult(response);
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: fillSippMainWorld,
+        args: [parsedData],
+      });
+      const response = results?.[0]?.result || { success: false, error: 'No result from injection' };
+      renderFillResult(response);
+    } catch (injectErr) {
+      console.error('[SIPP Extension] executeScript failed:', injectErr);
+      showStatus(`❌ Gagal inject: ${injectErr.message}. Coba refresh halaman SIPP.`, 'error');
+    }
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
   }
