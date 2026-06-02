@@ -505,9 +505,14 @@ async function fillSippMainWorld(data) {
       if (el) {
         setVal(el, val);
         result.filledFields++;
-        console.log(`[SIPP] Set ${id} = "${val}" (el.value="${el.value}")`);
-      } else {
-        console.warn(`[SIPP] Element #${id} NOT FOUND`);
+      }
+    }
+
+    // KUA dropdown (Select2)
+    if (mi.kua_dicatat) {
+      const kuaSelect = document.getElementById('ref_kua');
+      if (kuaSelect && setSelect(kuaSelect, mi.kua_dicatat)) {
+        result.filledFields++;
       }
     }
   }
@@ -518,9 +523,6 @@ async function fillSippMainWorld(data) {
     if (el) {
       setVal(el, data.tanggal_surat);
       result.filledFields++;
-      console.log(`[SIPP] Set tgl_surat = "${data.tanggal_surat}" (el.value="${el.value}")`);
-    } else {
-      console.warn('[SIPP] Element #tgl_surat NOT FOUND');
     }
   }
 
