@@ -461,6 +461,8 @@ async function fillSippMainWorld(data) {
       'tk': 'taman kanak-kanak',
       'tidak ada': 'tidak ada',
       'tidak sekolah': 'tidak ada',
+      'belum sekolah': 'tidak ada',
+      'belum tamat': 'tidak ada',
     };
     const expanded = shorthandMap[v] || v;
 
