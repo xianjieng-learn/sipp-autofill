@@ -426,8 +426,18 @@ async function fillSippMainWorld(data) {
     if (setter && setter !== Object.getOwnPropertyDescriptor(el.__proto__, 'value')?.set) {
       try { setter.call(el, value); } catch(e) {}
     }
-    // Minimal events — no blur/change that datepicker might intercept
+    // Trigger jQuery datepicker if present
+    if (typeof jQuery !== 'undefined') {
+      try {
+        const $el = jQuery(el);
+        if ($el.hasClass('hasDatepicker') || $el.data('datepicker')) {
+          $el.datepicker('setDate', value);
+        }
+        $el.val(value).trigger('input').trigger('change');
+      } catch(e) {}
+    }
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   }
 
@@ -570,7 +580,7 @@ async function fillSippMainWorld(data) {
         ['nama', child.nama, ['input[name="nama" i]', 'input[id="nama" i]']],
         ['nik', child.nik || '', ['input[name="nik" i]', 'input[id="nik" i]', 'input[name*="nik" i]']],
         ['tempat_lahir', child.tempat_lahir, ['input[name="tempat_lahir" i]', 'input[id="tempat_lahir" i]', 'input[name*="tempatlahir" i]']],
-        ['tanggal_lahir', child.tanggal_lahir, ['input[name="tanggal_lahir" i]', 'input[id="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
+        ['tanggal_lahir', child.tanggal_lahir, ['input[name="tgl_lahir" i]', 'input[id="tgl_lahir" i]', 'input[name="tanggal_lahir" i]', 'input[id="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
       ];
       for (const [key, val, sels] of fields) {
         if (!val) continue;

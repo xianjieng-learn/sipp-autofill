@@ -81,7 +81,7 @@ function fillChildForm(data) {
     { key: 'nama', value: data.nama || '', labels: ['Nama', 'Nama Anak', 'Nama Lengkap'], type: 'text' },
     { key: 'nik', value: data.nik || '', labels: ['NIK', 'Nik', 'Nomor Induk'], type: 'text' },
     { key: 'tempat_lahir', value: data.tempat_lahir || '', labels: ['Tempat Lahir', 'Tmp Lahir'], type: 'text' },
-    { key: 'tanggal_lahir', value: data.tanggal_lahir || '', labels: ['Tanggal Lahir', 'Tgl Lahir', 'Tgl. Lahir'], type: 'text' },
+    { key: 'tanggal_lahir', value: data.tanggal_lahir || '', labels: ['Tanggal Lahir', 'Tgl Lahir', 'Tgl. Lahir', 'Tgl Lahir'], type: 'text' },
     { key: 'jenis_kelamin', value: data.jenis_kelamin || '', labels: ['Jenis Kelamin', 'JK', 'Kelamin'], type: 'dropdown' },
     { key: 'pendidikan', value: data.pendidikan || '', labels: ['Pendidikan'], type: 'dropdown' },
     { key: 'pengasuhan', value: data.pengasuhan || '', labels: ['Diasuh oleh', 'Diasuh Oleh', 'Pengasuhan'], type: 'dropdown' },
