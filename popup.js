@@ -372,20 +372,15 @@ async function fillSippMainWorld(data) {
 
   function setVal(el, value) {
     if (!el) return false;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-      || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-    if (setter) setter.call(el, value);
-    else el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
-    if (typeof jQuery !== 'undefined') {
-      try {
-        const $el = jQuery(el);
-        $el.val(value).trigger('change');
-        // DO NOT call datepicker('setDate') — it overrides the value with its own format
-      } catch(e) {}
+    // Set value directly on DOM element
+    el.value = value;
+    // Also try native setter for React/framework compatibility
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (setter && setter !== Object.getOwnPropertyDescriptor(el.__proto__, 'value')?.set) {
+      try { setter.call(el, value); } catch(e) {}
     }
+    // Minimal events — no blur/change that datepicker might intercept
+    el.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   }
 
