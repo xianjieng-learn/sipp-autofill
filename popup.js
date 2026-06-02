@@ -445,27 +445,53 @@ function fillSippMainWorld(data) {
     else result.errors.push('Obyek Sengketa: tidak ditemukan');
   }
 
+  // Fill marriage info fields (Edit Data Umum form)
+  if (data.marriage_info) {
+    const mi = data.marriage_info;
+    const marriageFields = [
+      ['tgl_nikah', mi.tanggal_menikah],
+      ['tgl_kutipan_akta_nikah', mi.tanggal_dicatat],
+      ['no_kutipan_akta_nikah', mi.nomor_akta_nikah],
+    ];
+    for (const [id, val] of marriageFields) {
+      if (!val) continue;
+      const el = document.getElementById(id);
+      if (el) { setVal(el, val); result.filledFields++; }
+    }
+  }
+
   // Fill children (Data Anak — might be in separate popup)
   if (data.children && Array.isArray(data.children)) {
     for (const child of data.children) {
+      // Text inputs
       const fields = [
         ['nama', child.nama, ['input[name*="nama" i]', 'input[id*="nama" i]']],
         ['tempat_lahir', child.tempat_lahir, ['input[name*="tempat" i]', 'input[id*="tempat" i]']],
-        ['tanggal_lahir', child.tanggal_lahir, ['input[name*="tanggal" i]', 'input[id*="tanggal" i]']],
+        ['tanggal_lahir', child.tanggal_lahir, ['input[name*="tanggal" i]', 'input[id*="tanggal" i]', 'input[name*="tgl" i]', 'input[id*="tgl" i]']],
       ];
       for (const [key, val, sels] of fields) {
         if (!val) continue;
         for (const sel of sels) {
           const el = document.querySelector(sel);
-          if (el) { setVal(el, val); result.filledFields++; break; }
+          if (el) {
+            // Format date: PTSP outputs dd/mm/yyyy, SIPP expects same format
+            setVal(el, val);
+            result.filledFields++;
+            break;
+          }
         }
       }
       // Dropdowns
-      if (child.jenis_kelamin) {
-        const sels = ['select[name*="kelamin" i]', 'select[id*="kelamin" i]'];
-        for (const s of sels) {
-          const el = document.querySelector(s);
-          if (setSelect(el, child.jenis_kelamin)) { result.filledFields++; break; }
+      const dropdowns = [
+        ['jenis_kelamin', child.jenis_kelamin, ['select[name*="kelamin" i]', 'select[id*="kelamin" i]']],
+        ['pendidikan', child.pendidikan, ['select[name*="pendidikan" i]', 'select[id*="pendidikan" i]']],
+        ['pengasuhan', child.pengasuhan, ['select[name*="diasuh" i]', 'select[id*="diasuh" i]', 'select[name*="pengasuhan" i]', 'select[id*="pengasuhan" i]']],
+      ];
+      for (const [key, val, sels] of dropdowns) {
+        if (!val) continue;
+        for (const sel of sels) {
+          const el = document.querySelector(sel);
+          if (el && setSelect(el, val)) { result.filledFields++; break; }
         }
       }
     }
