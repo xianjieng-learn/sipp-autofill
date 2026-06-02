@@ -390,7 +390,14 @@ function fillSippMainWorld(data) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new Event('blur', { bubbles: true }));
     if (typeof jQuery !== 'undefined') {
-      try { jQuery(el).val(value).trigger('input').trigger('change').trigger('blur'); } catch(e) {}
+      try {
+        const $el = jQuery(el);
+        $el.val(value).trigger('input').trigger('change').trigger('blur');
+        // jQuery UI datepicker — sync internal state
+        if ($el.hasClass('hasDatepicker') && $el.datepicker) {
+          try { $el.datepicker('setDate', value); } catch(e) {}
+        }
+      } catch(e) {}
     }
     return true;
   }
