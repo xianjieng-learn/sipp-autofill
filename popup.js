@@ -413,11 +413,17 @@ async function fillSippMainWorld(data) {
 
   function setSelect(sel, value) {
     if (!sel) return false;
-    const v = value.toLowerCase();
-    const opt = Array.from(sel.options).find(o =>
-      o.text.toLowerCase() === v || o.value.toLowerCase() === v ||
-      o.text.toLowerCase().includes(v) || v.includes(o.text.toLowerCase())
-    );
+    // Normalize: remove extra spaces for flexible matching
+    const normalize = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const normalizeNoSpace = s => s.toLowerCase().replace(/\s+/g, '');
+    const v = normalize(value);
+    const vNoSpace = normalizeNoSpace(value);
+    const opt = Array.from(sel.options).find(o => {
+      const t = normalize(o.text);
+      const tNoSpace = normalizeNoSpace(o.text);
+      return t === v || t.includes(v) || v.includes(t) ||
+             tNoSpace === vNoSpace || tNoSpace.includes(vNoSpace) || vNoSpace.includes(tNoSpace);
+    });
     if (!opt) return false;
     if (typeof jQuery !== 'undefined' && jQuery(sel).data('select2')) {
       jQuery(sel).val(opt.value).trigger('change').trigger('select2:select');
