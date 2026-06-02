@@ -73,9 +73,13 @@ function fillChildForm(data) {
   // Auto-infer "Anak ke" from existing children count
   const anakKe = data.anak_ke || inferAnakKe();
   
+  console.log('[SIPP CHILD] Filling child form:', JSON.stringify({...data, _raw: undefined}, null, 2));
+  console.log('[SIPP CHILD] Anak ke:', anakKe, '(source:', data.anak_ke ? 'data' : 'inferred', ')');
+  
   const fieldMap = [
     { key: 'anak_ke', value: String(anakKe), labels: ['Anak ke', 'Anak Ke', 'Urutan'], type: 'text' },
     { key: 'nama', value: data.nama || '', labels: ['Nama', 'Nama Anak', 'Nama Lengkap'], type: 'text' },
+    { key: 'nik', value: data.nik || '', labels: ['NIK', 'Nik', 'Nomor Induk'], type: 'text' },
     { key: 'tempat_lahir', value: data.tempat_lahir || '', labels: ['Tempat Lahir', 'Tmp Lahir'], type: 'text' },
     { key: 'tanggal_lahir', value: data.tanggal_lahir || '', labels: ['Tanggal Lahir', 'Tgl Lahir', 'Tgl. Lahir'], type: 'text' },
     { key: 'jenis_kelamin', value: data.jenis_kelamin || '', labels: ['Jenis Kelamin', 'JK', 'Kelamin'], type: 'dropdown' },
@@ -97,8 +101,10 @@ function fillChildForm(data) {
 
       if (success) {
         filledFields++;
+        console.log(`[SIPP CHILD] ✅ ${field.key} = "${field.value}"`);
       } else {
         errors.push(`${field.key}: field tidak ditemukan`);
+        console.warn(`[SIPP CHILD] ❌ ${field.key} not found (labels: ${field.labels.join(', ')})`);
       }
     } catch (e) {
       errors.push(`${field.key}: ${e.message}`);

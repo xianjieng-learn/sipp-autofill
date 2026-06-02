@@ -110,11 +110,23 @@ function normalizeData(data) {
 }
 
 function normalizeChild(c) {
+  // Sanitize tempat_lahir / tanggal_lahir — sometimes extraction swaps them
+  let tempat = c.tempat_lahir || c.tempatLahir || '';
+  let tanggal = c.tanggal_lahir || c.tanggalLahir || '';
+
+  // If tanggal looks like a city name (no digits) and tempat looks like a date, swap
+  const tanggalIsDate = /\d/.test(tanggal);
+  const tempatIsDate = /\d/.test(tempat);
+  if (!tanggalIsDate && tempatIsDate) {
+    [tempat, tanggal] = [tanggal, tempat];
+  }
+
   return {
     anak_ke: c.anak_ke || c.index || null,
     nama: c.nama || c.name || '',
-    tempat_lahir: c.tempat_lahir || c.tempatLahir || '',
-    tanggal_lahir: c.tanggal_lahir || c.tanggalLahir || '',
+    nik: c.nik || '',
+    tempat_lahir: tempat,
+    tanggal_lahir: tanggal,
     jenis_kelamin: c.jenis_kelamin || c.jk || '',
     pendidikan: c.pendidikan || '',
     pengasuhan: c.pengasuhan || '',
@@ -176,6 +188,14 @@ function renderPreview(data) {
           <div class="preview-field">
             <span class="preview-label">Lahir</span>
             <span class="preview-value">${c.tempat_lahir}, ${c.tanggal_lahir}</span>
+          </div>
+        `;
+      }
+      if (c.nik) {
+        html += `
+          <div class="preview-field">
+            <span class="preview-label">NIK</span>
+            <span class="preview-value">${c.nik}</span>
           </div>
         `;
       }
@@ -543,22 +563,30 @@ async function fillSippMainWorld(data) {
   // Fill children (Data Anak — might be in separate popup)
   if (data.children && Array.isArray(data.children)) {
     for (const child of data.children) {
+      console.log('[SIPP CHILD] Filling child:', JSON.stringify({...child, _raw: undefined}));
       // Text inputs — use specific selectors to avoid matching wrong fields
       const fields = [
+        ['anak_ke', child.anak_ke ? String(child.anak_ke) : '', ['input[name="anak_ke" i]', 'input[id="anak_ke" i]', 'input[name*="anakke" i]']],
         ['nama', child.nama, ['input[name="nama" i]', 'input[id="nama" i]']],
+        ['nik', child.nik || '', ['input[name="nik" i]', 'input[id="nik" i]', 'input[name*="nik" i]']],
         ['tempat_lahir', child.tempat_lahir, ['input[name="tempat_lahir" i]', 'input[id="tempat_lahir" i]', 'input[name*="tempatlahir" i]']],
         ['tanggal_lahir', child.tanggal_lahir, ['input[name="tanggal_lahir" i]', 'input[id="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
       ];
       for (const [key, val, sels] of fields) {
         if (!val) continue;
+        let filled = false;
         for (const sel of sels) {
           const el = document.querySelector(sel);
           if (el) {
-            // Format date: PTSP outputs dd/mm/yyyy, SIPP expects same format
             setVal(el, val);
             result.filledFields++;
+            console.log(`[SIPP CHILD] ✅ ${key} = "${val}"`);
+            filled = true;
             break;
           }
+        }
+        if (!filled) {
+          console.warn(`[SIPP CHILD] ❌ ${key} not found (selectors: ${sels.join(', ')})`);
         }
       }
       // Dropdowns — use specific selectors
@@ -569,9 +597,18 @@ async function fillSippMainWorld(data) {
       ];
       for (const [key, val, sels] of dropdowns) {
         if (!val) continue;
+        let filled = false;
         for (const sel of sels) {
           const el = document.querySelector(sel);
-          if (el && setSelect(el, val)) { result.filledFields++; break; }
+          if (el && setSelect(el, val)) {
+            result.filledFields++;
+            console.log(`[SIPP CHILD] ✅ ${key} = "${val}" (dropdown)`);
+            filled = true;
+            break;
+          }
+        }
+        if (!filled) {
+          console.warn(`[SIPP CHILD] ❌ ${key} dropdown not found or no match (selectors: ${sels.join(', ')})`);
         }
       }
     }
