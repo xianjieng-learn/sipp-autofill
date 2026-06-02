@@ -508,12 +508,26 @@ async function fillSippMainWorld(data) {
       }
     }
 
-    // KUA dropdown (Select2)
+    // KUA dropdown (Select2) — direct jQuery approach
     if (mi.kua_dicatat) {
-      const kuaSelect = document.getElementById('ref_kua');
-      if (kuaSelect && setSelect(kuaSelect, mi.kua_dicatat)) {
-        result.filledFields++;
-      }
+      try {
+        const $kua = jQuery('#ref_kua');
+        if ($kua.length) {
+          const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
+          let found = false;
+          $kua.find('option').each(function() {
+            const t = jQuery(this).text().toLowerCase().replace(/\s+/g, '');
+            if (t.includes(v) || v.includes(t) || t.includes(mi.kua_dicatat.toLowerCase())) {
+              $kua.val(jQuery(this).val()).trigger('change');
+              // Update Select2 display text
+              jQuery('#select2-ref_kua-container').attr('title', jQuery(this).text()).text(jQuery(this).text());
+              found = true;
+              return false; // break
+            }
+          });
+          if (found) result.filledFields++;
+        }
+      } catch(e) {}
     }
   }
 
