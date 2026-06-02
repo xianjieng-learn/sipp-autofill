@@ -458,8 +458,60 @@ function setInputValue(input, value) {
 
 /**
  * Set textarea value and trigger events.
+ * Also handles CKEditor instances — SIPP uses CKEditor for Posita/Petitum.
  */
 function setTextAreaValue(textarea, value) {
+  // Strategy 1: If CKEditor is present, use its API (SIPP uses CKEditor for rich text)
+  if (typeof CKEDITOR !== 'undefined' && textarea.id) {
+    const editor = CKEDITOR.instances[textarea.id];
+    if (editor) {
+      editor.setData(value);
+      // Sync back to hidden textarea for form submission
+      textarea.value = value;
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    // Try to find CKEditor instance by name iteration
+    for (const instanceName in CKEDITOR.instances) {
+      const inst = CKEDITOR.instances[instanceName];
+      if (inst.element && inst.element.getAttribute('id') === textarea.id) {
+        inst.setData(value);
+        textarea.value = value;
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+    }
+  }
+
+  // Strategy 2: CKEditor with iframe — find editor by class and use API
+  if (typeof CKEDITOR !== 'undefined') {
+    const allInstances = Object.keys(CKEDITOR.instances);
+    if (allInstances.length > 0) {
+      // Use first available CKEditor instance if textarea is near a CKEditor
+      const parentTd = textarea.closest('td');
+      if (parentTd) {
+        const ckeDiv = parentTd.querySelector('.cke');
+        if (ckeDiv) {
+          for (const instanceName in CKEDITOR.instances) {
+            const inst = CKEDITOR.instances[instanceName];
+            if (inst.element && inst.element.$.closest('td') === parentTd) {
+              inst.setData(value);
+              textarea.value = value;
+              textarea.dispatchEvent(new Event('change', { bubbles: true }));
+              return;
+            }
+          }
+          // Fallback: use first instance
+          CKEDITOR.instances[allInstances[0]].setData(value);
+          textarea.value = value;
+          textarea.dispatchEvent(new Event('change', { bubbles: true }));
+          return;
+        }
+      }
+    }
+  }
+
+  // Strategy 3: Plain textarea (no CKEditor)
   textarea.focus();
   textarea.value = '';
   
