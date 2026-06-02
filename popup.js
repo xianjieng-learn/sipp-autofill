@@ -474,11 +474,11 @@ async function fillSippMainWorld(data) {
   // Fill children (Data Anak — might be in separate popup)
   if (data.children && Array.isArray(data.children)) {
     for (const child of data.children) {
-      // Text inputs
+      // Text inputs — use specific selectors to avoid matching wrong fields
       const fields = [
-        ['nama', child.nama, ['input[name*="nama" i]', 'input[id*="nama" i]']],
-        ['tempat_lahir', child.tempat_lahir, ['input[name*="tempat" i]', 'input[id*="tempat" i]']],
-        ['tanggal_lahir', child.tanggal_lahir, ['input[name*="tanggal" i]', 'input[id*="tanggal" i]', 'input[name*="tgl" i]', 'input[id*="tgl" i]']],
+        ['nama', child.nama, ['input[name="nama" i]', 'input[id="nama" i]']],
+        ['tempat_lahir', child.tempat_lahir, ['input[name="tempat_lahir" i]', 'input[id="tempat_lahir" i]', 'input[name*="tempatlahir" i]']],
+        ['tanggal_lahir', child.tanggal_lahir, ['input[name="tanggal_lahir" i]', 'input[id="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
       ];
       for (const [key, val, sels] of fields) {
         if (!val) continue;
@@ -492,11 +492,11 @@ async function fillSippMainWorld(data) {
           }
         }
       }
-      // Dropdowns
+      // Dropdowns — use specific selectors
       const dropdowns = [
-        ['jenis_kelamin', child.jenis_kelamin, ['select[name*="kelamin" i]', 'select[id*="kelamin" i]']],
-        ['pendidikan', child.pendidikan, ['select[name*="pendidikan" i]', 'select[id*="pendidikan" i]']],
-        ['pengasuhan', child.pengasuhan, ['select[name*="diasuh" i]', 'select[id*="diasuh" i]', 'select[name*="pengasuhan" i]', 'select[id*="pengasuhan" i]']],
+        ['jenis_kelamin', child.jenis_kelamin, ['select[name="jenis_kelamin" i]', 'select[id="jenis_kelamin" i]']],
+        ['pendidikan', child.pendidikan, ['select[name="pendidikan" i]', 'select[id="pendidikan" i]', 'select[name="jenis_pendidikan" i]']],
+        ['pengasuhan', child.pengasuhan, ['select[name="diasuh" i]', 'select[id="diasuh" i]', 'select[name*="diasuh" i]']],
       ];
       for (const [key, val, sels] of dropdowns) {
         if (!val) continue;
