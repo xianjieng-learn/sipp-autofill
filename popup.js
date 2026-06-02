@@ -60,6 +60,7 @@ function normalizeData(data) {
     petitum: '',
     obyek_sengketa: '-',
     marriage_info: {},
+    tanggal_surat: '',
   };
 
   // Handle children array
@@ -77,8 +78,26 @@ function normalizeData(data) {
     result.petitum = data.petitum;
   }
 
-  // Handle marriage info
-  if (data.tanggal_menikah || data.tanggal_dicatat || data.nomor_akta_nikah || data.kua_dicatat) {
+  // Handle obyek sengketa
+  if (data.obyek_sengketa) {
+    result.obyek_sengketa = data.obyek_sengketa;
+  }
+
+  // Handle tanggal surat
+  if (data.tanggal_surat) {
+    result.tanggal_surat = data.tanggal_surat;
+  }
+
+  // Handle marriage info — nested object from PTSP Helper
+  if (data.marriage_info && typeof data.marriage_info === 'object') {
+    result.marriage_info = {
+      tanggal_menikah: data.marriage_info.tanggal_menikah || '',
+      tanggal_dicatat: data.marriage_info.tanggal_dicatat || '',
+      nomor_akta_nikah: data.marriage_info.nomor_akta_nikah || '',
+      kua_dicatat: data.marriage_info.kua_dicatat || '',
+    };
+  } else if (data.tanggal_menikah || data.tanggal_dicatat || data.nomor_akta_nikah || data.kua_dicatat) {
+    // Fallback: top-level fields (old format)
     result.marriage_info = {
       tanggal_menikah: data.tanggal_menikah || '',
       tanggal_dicatat: data.tanggal_dicatat || '',
