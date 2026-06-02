@@ -570,26 +570,48 @@ async function fillSippMainWorld(data) {
       }
     }
 
-    // KUA dropdown (Select2) — direct jQuery approach
+    // KUA dropdown — try Select2 first, fallback to vanilla JS
     if (mi.kua_dicatat) {
-      try {
-        const $kua = jQuery('#ref_kua');
-        if ($kua.length) {
+      let found = false;
+      // Strategy 1: jQuery/Select2 (if available)
+      if (typeof jQuery !== 'undefined') {
+        try {
+          const $kua = jQuery('#ref_kua');
+          if ($kua.length) {
+            const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
+            $kua.find('option').each(function() {
+              const t = jQuery(this).text().toLowerCase().replace(/\s+/g, '');
+              if (t.includes(v) || v.includes(t) || t.includes(mi.kua_dicatat.toLowerCase())) {
+                $kua.val(jQuery(this).val()).trigger('change');
+                // Update Select2 display if exists
+                const $container = jQuery('#select2-ref_kua-container');
+                if ($container.length) {
+                  $container.attr('title', jQuery(this).text()).text(jQuery(this).text());
+                }
+                found = true;
+                return false; // break
+              }
+            });
+          }
+        } catch(e) {}
+      }
+      // Strategy 2: Vanilla JS fallback (when jQuery not available)
+      if (!found) {
+        const kuaEl = document.getElementById('ref_kua');
+        if (kuaEl) {
           const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
-          let found = false;
-          $kua.find('option').each(function() {
-            const t = jQuery(this).text().toLowerCase().replace(/\s+/g, '');
+          for (const opt of kuaEl.options) {
+            const t = opt.text.toLowerCase().replace(/\s+/g, '');
             if (t.includes(v) || v.includes(t) || t.includes(mi.kua_dicatat.toLowerCase())) {
-              $kua.val(jQuery(this).val()).trigger('change');
-              // Update Select2 display text
-              jQuery('#select2-ref_kua-container').attr('title', jQuery(this).text()).text(jQuery(this).text());
+              kuaEl.value = opt.value;
+              kuaEl.dispatchEvent(new Event('change', { bubbles: true }));
               found = true;
-              return false; // break
+              break;
             }
-          });
-          if (found) result.filledFields++;
+          }
         }
-      } catch(e) {}
+      }
+      if (found) result.filledFields++;
     }
   }
 
