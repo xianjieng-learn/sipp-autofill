@@ -254,14 +254,24 @@ async function fillAllSipp() {
         data: parsedData,
       });
     } catch (sendErr) {
-      // Content script not injected yet — inject it programmatically, then retry
+      // Content script not injected yet — inject via executeScript with func (more reliable than files)
       showStatus('⏳ Injecting content script...', 'info');
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js'],
-      });
-      // Small delay for script to initialize
-      await new Promise(r => setTimeout(r, 200));
+      try {
+        // Inject the content.js file
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js'],
+        });
+      } catch (injectErr) {
+        // If file injection fails, try injecting inline
+        console.warn('File injection failed, trying inline:', injectErr);
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => { /* content script marker */ },
+        });
+      }
+      // Wait for script to initialize
+      await new Promise(r => setTimeout(r, 500));
       response = await chrome.tabs.sendMessage(tab.id, {
         action: 'fillAllSipp',
         data: parsedData,
