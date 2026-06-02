@@ -443,15 +443,45 @@ async function fillSippMainWorld(data) {
 
   function setSelect(sel, value) {
     if (!sel) return false;
-    const normalize = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-    const removeSpaces = s => s.toLowerCase().replace(/\s+/g, '');
+    const normalize = s => s.toLowerCase().replace(/\\s+/g, ' ').trim();
+    const removeSpaces = s => s.toLowerCase().replace(/\\s+/g, '');
     const v = normalize(value);
 
-    // Strategy 1: normal match (with spaces)
-    let opt = Array.from(sel.options).find(o => {
-      const t = normalize(o.text);
-      return t === v || t.includes(v) || v.includes(t);
-    });
+    // Shorthand mapping for common abbreviations
+    const shorthandMap = {
+      'sd': 'sekolah dasar',
+      'smp': 'sekolah lanjutan tingkat pertama',
+      'sma': 'sekolah lanjutan tingkat atas',
+      'smk': 'sekolah lanjutan tingkat atas',
+      's1': 'strata i',
+      's2': 'strata ii',
+      's3': 'strata iii',
+      'd3': 'diploma iii',
+      'd4': 'diploma iv',
+      'tk': 'taman kanak-kanak',
+      'tidak ada': 'tidak ada',
+      'tidak sekolah': 'tidak ada',
+    };
+    const expanded = shorthandMap[v] || v;
+
+    // Strategy 0: exact value match (for numeric values like "1", "2", etc.)
+    let opt = Array.from(sel.options).find(o => o.value === value);
+
+    // Strategy 1: normal match (with spaces) — match option text
+    if (!opt) {
+      opt = Array.from(sel.options).find(o => {
+        const t = normalize(o.text);
+        return t === expanded || t.includes(expanded) || expanded.includes(t);
+      });
+    }
+
+    // Strategy 1b: match original value against option text too
+    if (!opt) {
+      opt = Array.from(sel.options).find(o => {
+        const t = normalize(o.text);
+        return t === v || t.includes(v) || v.includes(t);
+      });
+    }
 
     // Strategy 2: no-space fallback (for "Kedung Tuban" vs "Kedungtuban")
     if (!opt) {
