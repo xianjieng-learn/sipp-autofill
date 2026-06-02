@@ -363,7 +363,7 @@ async function fillSippMainWorld(data) {
         html += `<li>${numMatch[2]}</li>`;
       } else {
         if (inOl) { html += '</ol>'; inOl = false; }
-        html += `<p>${trimmed}</p>`;
+        html += `<p style="text-align:justify">${trimmed}</p>`;
       }
     }
     if (inOl) html += '</ol>';
