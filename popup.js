@@ -460,6 +460,12 @@ function fillSippMainWorld(data) {
     }
   }
 
+  // Fill Tanggal Surat
+  if (data.tanggal_surat) {
+    const el = document.getElementById('tgl_surat');
+    if (el) { setVal(el, data.tanggal_surat); result.filledFields++; }
+  }
+
   // Fill children (Data Anak — might be in separate popup)
   if (data.children && Array.isArray(data.children)) {
     for (const child of data.children) {
