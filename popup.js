@@ -382,11 +382,8 @@ async function fillSippMainWorld(data) {
     if (typeof jQuery !== 'undefined') {
       try {
         const $el = jQuery(el);
-        $el.val(value).trigger('input').trigger('change').trigger('blur');
-        // jQuery UI datepicker — sync internal state
-        if ($el.hasClass('hasDatepicker') && $el.datepicker) {
-          try { $el.datepicker('setDate', value); } catch(e) {}
-        }
+        $el.val(value).trigger('change');
+        // DO NOT call datepicker('setDate') — it overrides the value with its own format
       } catch(e) {}
     }
     return true;
