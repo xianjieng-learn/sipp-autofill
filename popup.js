@@ -343,6 +343,9 @@ if (jsonInput.value.trim()) {
 // This function is injected into the page's MAIN world via chrome.scripting.executeScript
 // so it can access CKEDITOR, jQuery, and other page-level variables.
 async function fillSippMainWorld(data) {
+  console.log('[SIPP MAIN] Function called. Data keys:', Object.keys(data));
+  console.log('[SIPP MAIN] marriage_info:', data.marriage_info);
+  console.log('[SIPP MAIN] tanggal_surat:', data.tanggal_surat);
   const result = { filledFields: 0, errors: [] };
 
   // Convert plain text posita/petitum to HTML for CKEditor
