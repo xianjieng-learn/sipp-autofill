@@ -19,7 +19,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://ecourt.mahkamahagung.go.id/*"],
+      "matches": ["*://ecourt.mahkamahagung.go.id/*", "*://25.24.23.7/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

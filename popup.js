@@ -237,7 +237,9 @@ async function fillAllSipp() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
-    if (!tab || !tab.url.includes('ecourt.mahkamahagung.go.id')) {
+    const sippHosts = ['ecourt.mahkamahagung.go.id', '25.24.23.7'];
+    const isSippPage = sippHosts.some(host => tab.url.includes(host));
+    if (!tab || !isSippPage) {
       showStatus('❌ Buka halaman SIPP di eCourt dulu!', 'error');
       btnFillAll.disabled = false;
       btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
