@@ -406,7 +406,7 @@ async function fillSippMainWorld(data) {
                  .replace(/<li(\s[^>]*)?>/gi, '<li$1 style="text-align:justify">');
     }
     // Convert plain text with numbered list + sub-numbering to HTML
-    // Supports: 1. 2. (main) + a. b. c. or i. ii. iii. (sub) + 1.1 1.2 (sub)
+    // Supports: 1. 2. (main) + a. b. c. or i. ii. iii. (sub) + 4.1 4.2 (sub)
     const lines = text.split(/\r?\n/);
     let html = '';
     let inOl = false;
@@ -421,20 +421,20 @@ async function fillSippMainWorld(data) {
         html += '<p style="text-align:justify">&nbsp;</p>';
         continue;
       }
-      // Main numbered item: "1." "2." etc.
-      const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
-      // Sub-numbered item: "a." "b." "i." "ii." or "1.1" "1.2" etc.
-      const subAlphaMatch = trimmed.match(/^([a-z])[.)]\s*(.+)/i);
+      // Check sub-decimal FIRST (e.g. "4.1." "5.2.") to avoid false main-number match
       const subDecimalMatch = trimmed.match(/^(\d+\.\d+)[.)]?\s*(.+)/);
+      // Sub-numbered item: "a." "b." "i." "ii."
+      const subAlphaMatch = trimmed.match(/^([a-z])[.)]\s*(.+)/i);
+      // Main numbered item: "1." "2." etc. — must NOT be followed by another digit+dot
+      const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
 
-      if (numMatch) {
-        // Close previous sub-list and <li> if open
-        if (inSubOl) { html += '</ol>'; inSubOl = false; }
-        if (liOpen) { html += '</li>'; liOpen = false; }
-        if (!inOl) { html += '<ol>'; inOl = true; }
-        // Open new <li> but don't close yet (sub-items may follow)
-        html += `<li style="text-align:justify">${numMatch[2]}`;
-        liOpen = true;
+      if (subDecimalMatch && inOl) {
+        // Decimal sub-item: "4.1 description" — must be inside a main list
+        if (!inSubOl) {
+          html += '<ol style="list-style-type:decimal">';
+          inSubOl = true;
+        }
+        html += `<li style="text-align:justify">${subDecimalMatch[2]}</li>`;
       } else if (subAlphaMatch && inOl) {
         // Sub-item under a main item: open nested <ol> inside last <li>
         if (!inSubOl) {
@@ -442,13 +442,14 @@ async function fillSippMainWorld(data) {
           inSubOl = true;
         }
         html += `<li style="text-align:justify">${subAlphaMatch[2]}</li>`;
-      } else if (subDecimalMatch && inOl) {
-        // Decimal sub-item: "1.1 description"
-        if (!inSubOl) {
-          html += '<ol style="list-style-type:decimal">';
-          inSubOl = true;
-        }
-        html += `<li style="text-align:justify">${subDecimalMatch[2]}</li>`;
+      } else if (numMatch) {
+        // Close previous sub-list and <li> if open
+        if (inSubOl) { html += '</ol>'; inSubOl = false; }
+        if (liOpen) { html += '</li>'; liOpen = false; }
+        if (!inOl) { html += '<ol>'; inOl = true; }
+        // Open new <li> but don't close yet (sub-items may follow)
+        html += `<li style="text-align:justify">${numMatch[2]}`;
+        liOpen = true;
       } else {
         // Close any open lists
         if (inSubOl) { html += '</ol>'; inSubOl = false; }
