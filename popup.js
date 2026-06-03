@@ -808,6 +808,32 @@ async function fillSippMainWorld(data) {
         }
       }
 
+      // Step 2.5: try short term with spaces removed (SIPP stores "Kramat Jati" as "Kramatjati")
+      if (!match) {
+        const noSpace = shortTerm.replace(/\s+/g, '');
+        if (noSpace !== shortTerm && noSpace.length > 3) {
+          response = await new Promise((resolve) => {
+            jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: noSpace },
+              success: (r) => { console.log('[SIPP KUA] noSpace response:', r); resolve(Array.isArray(r) ? r : []); },
+              error: () => resolve([]),
+            });
+          });
+          const v = noSpace.toLowerCase();
+          const candidates = response.filter((item) => {
+            const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
+            return t.includes(v) || v.includes(t);
+          });
+          console.log('[SIPP KUA] noSpace candidates:', candidates);
+          if (candidates.length === 1) {
+            match = candidates[0];
+          } else if (candidates.length > 1 && cityPart) {
+            match = candidates.find((item) =>
+              String(item.text || '').toLowerCase().includes(cityPart.toLowerCase())
+            ) || null;
+          }
+        }
+      }
+
       // Step 3: if still no match, try first word only (last resort)
       if (!match && shortTerm.split(/\s+/).length > 1) {
         const firstWord = shortTerm.split(/\s+/)[0];
