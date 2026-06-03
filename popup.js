@@ -505,10 +505,24 @@ async function fillSippMainWorld(data) {
       try {
         const $el = jQuery(el);
         if ($el.hasClass('hasDatepicker') || $el.data('datepicker')) {
-          $el.datepicker('setDate', value);
+          // Parse DD/MM/YYYY (or DD/MM/YY) into a Date object so setDate works
+          // regardless of the datepicker's dateFormat setting.
+          const parts = String(value).split('/');
+          if (parts.length === 3) {
+            let [d, m, y] = parts;
+            if (y.length === 2) y = '20' + y;
+            const dt = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+            if (!isNaN(dt.getTime())) {
+              $el.datepicker('setDate', dt);
+            } else {
+              $el.datepicker('setDate', value); // fallback: raw string
+            }
+          } else {
+            $el.datepicker('setDate', value); // fallback
+          }
         }
         $el.val(value).trigger('input').trigger('change');
-      } catch(e) {}
+      } catch(e) { console.warn('[SIPP setVal] datepicker error:', e.message); }
     }
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -898,9 +912,13 @@ async function fillSippMainWorld(data) {
   // Fill Tanggal Surat — skip while the separate Data Anak popup is open.
   if (!isDataAnakForm && data.tanggal_surat) {
     const el = document.getElementById('tgl_surat');
+    console.log('[SIPP MAIN] tgl_surat element:', el, 'value:', data.tanggal_surat);
     if (el) {
       setVal(el, data.tanggal_surat);
+      console.log('[SIPP MAIN] tgl_surat after setVal:', el.value);
       result.filledFields++;
+    } else {
+      console.warn('[SIPP MAIN] ❌ tgl_surat element NOT FOUND');
     }
   }
 
