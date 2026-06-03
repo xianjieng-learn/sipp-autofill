@@ -288,11 +288,18 @@ async function fillAllSipp() {
     // Always inject into MAIN world for fill — content script (isolated world) can't access CKEDITOR
     showStatus('⏳ Mengisi form SIPP...', 'info');
     try {
+      // Data Anak lives in a separate SIPP popup that can save only ONE child at a time.
+      // If a child card is selected in the extension, send only that child so we don't
+      // loop through all children and overwrite the same Data Anak form.
+      const dataForFill = selectedChild
+        ? { ...parsedData, children: [selectedChild] }
+        : parsedData;
+
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'MAIN',
         func: fillSippMainWorld,
-        args: [parsedData],
+        args: [dataForFill],
       });
       const response = results?.[0]?.result || { success: false, error: 'No result from injection' };
       renderFillResult(response);
@@ -386,6 +393,8 @@ async function fillSippMainWorld(data) {
   console.log('[SIPP MAIN] marriage_info:', data.marriage_info);
   console.log('[SIPP MAIN] tanggal_surat:', data.tanggal_surat);
   const result = { filledFields: 0, errors: [] };
+  const isDataAnakForm = !!document.querySelector('form[action*="addAnakPihak"], #frm_user #anak_ke, #frm_user #tgl_lahir');
+  console.log('[SIPP MAIN] isDataAnakForm:', isDataAnakForm);
 
   // Convert plain text posita/petitum to HTML for CKEditor
   function textToHtml(text) {
@@ -442,55 +451,99 @@ async function fillSippMainWorld(data) {
   }
 
   function setSelect(sel, value) {
-    if (!sel) return false;
-    const normalize = s => s.toLowerCase().replace(/\\s+/g, ' ').trim();
-    const removeSpaces = s => s.toLowerCase().replace(/\\s+/g, '');
+    if (!sel || value === undefined || value === null || value === '') return false;
+    const normalize = (s) => String(s || '')
+      .toLowerCase()
+      .replace(/[._-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const compact = (s) => normalize(s).replace(/\s+/g, '');
     const v = normalize(value);
+    const fieldKey = normalize(`${sel.id || ''} ${sel.name || ''}`);
+    const isDiasuh = fieldKey.includes('diasuh');
+    const isJenisKelamin = fieldKey.includes('jenis kelamin') || fieldKey.includes('jeniskelamin');
 
-    // Shorthand mapping for common abbreviations
+    // Shorthand mapping for common SIPP/PTSP Helper values.
+    // Map to the exact-ish option text, then match by option text.
     const shorthandMap = {
+      // pendidikan
       'sd': 'sekolah dasar',
+      's d': 'sekolah dasar',
       'smp': 'sekolah lanjutan tingkat pertama',
+      'sltp': 'sekolah lanjutan tingkat pertama',
+      'mts': 'sekolah lanjutan tingkat pertama',
       'sma': 'sekolah lanjutan tingkat atas',
       'smk': 'sekolah lanjutan tingkat atas',
+      'ma': 'sekolah lanjutan tingkat atas',
+      'slta': 'sekolah lanjutan tingkat atas',
       's1': 'strata i',
+      'strata 1': 'strata i',
       's2': 'strata ii',
+      'strata 2': 'strata ii',
       's3': 'strata iii',
+      'strata 3': 'strata iii',
+      'd1': 'diploma i',
+      'd2': 'diploma ii',
       'd3': 'diploma iii',
       'd4': 'diploma iv',
       'tk': 'taman kanak-kanak',
+      'paud': 'taman kanak-kanak',
       'tidak ada': 'tidak ada',
       'tidak sekolah': 'tidak ada',
       'belum sekolah': 'tidak ada',
       'belum tamat': 'tidak ada',
+      // diasuh oleh
+      'penggugat': 'penggugat/pemohon',
+      'pemohon': 'penggugat/pemohon',
+      'tergugat': 'tergugat/termohon',
+      'termohon': 'tergugat/termohon',
+      'orang tua': 'orang tua p atau t',
+      'orang tua p/t': 'orang tua p atau t',
+      'orang tua p atau t': 'orang tua p atau t',
+      'lain lain': 'lain-lain',
+      'lainnya': 'lain-lain',
+      // jenis kelamin
+      'laki laki': 'laki-laki',
+      'laki-laki': 'laki-laki',
+      'perempuan': 'perempuan',
     };
+    if (isDiasuh) {
+      if (v === 'p') shorthandMap[v] = 'penggugat/pemohon';
+      if (v === 't') shorthandMap[v] = 'tergugat/termohon';
+    }
+    if (isJenisKelamin) {
+      if (v === 'l' || v === 'lk') shorthandMap[v] = 'laki-laki';
+      if (v === 'p' || v === 'pr') shorthandMap[v] = 'perempuan';
+    }
     const expanded = shorthandMap[v] || v;
 
-    // Strategy 0: exact value match (for numeric values like "1", "2", etc.)
-    let opt = Array.from(sel.options).find(o => o.value === value);
+    const options = Array.from(sel.options || []);
+    let opt = options.find(o => String(o.value) === String(value));
 
-    // Strategy 1: normal match (with spaces) — match option text
+    // Text match against expanded value first.
     if (!opt) {
-      opt = Array.from(sel.options).find(o => {
+      opt = options.find(o => {
         const t = normalize(o.text);
         return t === expanded || t.includes(expanded) || expanded.includes(t);
       });
     }
 
-    // Strategy 1b: match original value against option text too
+    // Text match against original value.
     if (!opt) {
-      opt = Array.from(sel.options).find(o => {
+      opt = options.find(o => {
         const t = normalize(o.text);
         return t === v || t.includes(v) || v.includes(t);
       });
     }
 
-    // Strategy 2: no-space fallback (for "Kedung Tuban" vs "Kedungtuban")
+    // Compact fallback: "Laki laki" vs "Laki-laki", "Kedung Tuban" vs "Kedungtuban".
     if (!opt) {
-      const vNoSpace = removeSpaces(value);
-      opt = Array.from(sel.options).find(o => {
-        const tNoSpace = removeSpaces(o.text);
-        return tNoSpace === vNoSpace || tNoSpace.includes(vNoSpace) || vNoSpace.includes(tNoSpace);
+      const wantCompact = compact(expanded);
+      const rawCompact = compact(value);
+      opt = options.find(o => {
+        const tCompact = compact(o.text);
+        return tCompact === wantCompact || tCompact.includes(wantCompact) || wantCompact.includes(tCompact)
+          || tCompact === rawCompact || tCompact.includes(rawCompact) || rawCompact.includes(tCompact);
       });
     }
 
@@ -499,13 +552,14 @@ async function fillSippMainWorld(data) {
       jQuery(sel).val(opt.value).trigger('change').trigger('select2:select');
     } else {
       sel.value = opt.value;
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
       sel.dispatchEvent(new Event('change', { bubbles: true }));
     }
     return true;
   }
 
-  // Fill Posita (CKEditor)
-  if (data.posita) {
+  // Fill Posita (CKEditor) — skip while the separate Data Anak popup is open.
+  if (!isDataAnakForm && data.posita) {
     let filled = false;
     // Try up to 3 times with delay (CKEditor might not be initialized yet)
     for (let attempt = 0; attempt < 3 && !filled; attempt++) {
@@ -526,8 +580,8 @@ async function fillSippMainWorld(data) {
     if (!filled) result.errors.push('Posita: CKEditor tidak ditemukan');
   }
 
-  // Fill Petitum (CKEditor)
-  if (data.petitum) {
+  // Fill Petitum (CKEditor) — skip while the separate Data Anak popup is open.
+  if (!isDataAnakForm && data.petitum) {
     let filled = false;
     for (let attempt = 0; attempt < 3 && !filled; attempt++) {
       if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
@@ -546,15 +600,15 @@ async function fillSippMainWorld(data) {
     if (!filled) result.errors.push('Petitum: CKEditor tidak ditemukan');
   }
 
-  // Fill Obyek Sengketa (plain textarea)
-  if (data.obyek_sengketa) {
+  // Fill Obyek Sengketa (plain textarea) — skip while the separate Data Anak popup is open.
+  if (!isDataAnakForm && data.obyek_sengketa) {
     const ta = document.getElementById('obyek_gugatan');
     if (ta) { setVal(ta, data.obyek_sengketa); result.filledFields++; }
     else result.errors.push('Obyek Sengketa: tidak ditemukan');
   }
 
-  // Fill marriage info fields (Edit Data Umum form)
-  if (data.marriage_info) {
+  // Fill marriage info fields (Edit Data Umum form) — skip while the separate Data Anak popup is open.
+  if (!isDataAnakForm && data.marriage_info) {
     const mi = data.marriage_info;
     const marriageFields = [
       ['tgl_nikah', mi.tanggal_menikah],
@@ -611,12 +665,53 @@ async function fillSippMainWorld(data) {
           }
         }
       }
+
+      // Strategy 3: Select2 AJAX lookup. SIPP only preloads the current KUA option;
+      // other KUA values (e.g. Cipayung) must be fetched from /kua/cari before selection.
+      if (!found && typeof jQuery !== 'undefined') {
+        try {
+          const $kua = jQuery('#ref_kua');
+          const ajaxConfig = $kua.data('select2')?.options?.options?.ajax;
+          const url = ajaxConfig?.url;
+          if ($kua.length && url) {
+            const response = await new Promise((resolve) => {
+              jQuery.ajax({
+                url,
+                type: ajaxConfig.type || 'post',
+                dataType: ajaxConfig.dataType || 'json',
+                data: { term: mi.kua_dicatat },
+                success: (r) => resolve(Array.isArray(r) ? r : []),
+                error: () => resolve([]),
+              });
+            });
+            const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
+            const match = response.find((item) => {
+              const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
+              return t.includes(v) || v.includes(t) || String(item.text || '').toLowerCase().includes(mi.kua_dicatat.toLowerCase());
+            });
+            if (match?.id) {
+              if (!$kua.find(`option[value="${match.id}"]`).length) {
+                $kua.append(new Option(match.text, match.id, true, true));
+              }
+              $kua.val(match.id).trigger('change');
+              const $container = jQuery('#select2-ref_kua-container');
+              if ($container.length) {
+                $container.attr('title', match.text).text(match.text);
+              }
+              found = true;
+            }
+          }
+        } catch(e) {
+          result.errors.push('KUA AJAX: ' + e.message);
+        }
+      }
       if (found) result.filledFields++;
+      else result.errors.push('KUA Dicatat: tidak ditemukan (' + mi.kua_dicatat + ')');
     }
   }
 
-  // Fill Tanggal Surat
-  if (data.tanggal_surat) {
+  // Fill Tanggal Surat — skip while the separate Data Anak popup is open.
+  if (!isDataAnakForm && data.tanggal_surat) {
     const el = document.getElementById('tgl_surat');
     if (el) {
       setVal(el, data.tanggal_surat);
@@ -657,7 +752,7 @@ async function fillSippMainWorld(data) {
       const dropdowns = [
         ['jenis_kelamin', child.jenis_kelamin, ['select[name="jenis_kelamin" i]', 'select[id="jenis_kelamin" i]']],
         ['pendidikan', child.pendidikan, ['select[name="pendidikan" i]', 'select[id="pendidikan" i]', 'select[name="jenis_pendidikan" i]']],
-        ['pengasuhan', child.pengasuhan, ['select[name="diasuh" i]', 'select[id="diasuh" i]', 'select[name*="diasuh" i]']],
+        ['pengasuhan', child.pengasuhan, ['select[name="diasuh_oleh" i]', 'select[id="diasuh_oleh" i]', 'select[name="diasuh" i]', 'select[id="diasuh" i]', 'select[name*="diasuh" i]', 'select[id*="diasuh" i]']],
       ];
       for (const [key, val, sels] of dropdowns) {
         if (!val) continue;
