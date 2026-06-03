@@ -749,72 +749,94 @@ async function fillSippMainWorld(data) {
         }
       }
 
-      // Strategy 3: AJAX lookup for KUA not in preloaded options.
-      // SIPP only preloads the current KUA; others need /SIPP/kua/cari POST.
-      // Note: SIPP may store "Kramatjati" while data has "Kramat Jati" (space diff).
-      if (!found && typeof jQuery !== 'undefined') {
-        try {
-          const $kua = jQuery('#ref_kua');
-          // Try Select2 AJAX config first, fallback to hardcoded endpoint
-          let ajaxUrl = null;
-          let ajaxType = 'post';
-          try {
-            const ajaxConfig = $kua.data('select2')?.options?.options?.ajax;
-            ajaxUrl = ajaxConfig?.url || null;
-            ajaxType = ajaxConfig?.type || 'post';
-          } catch(_) {}
+      // Strategy 3: AJAX lookup. Try full term first, then short with disambiguation.
+      // Full term e.g. "Kramat Jati, Kota Jakarta Timur" — most specific.
+      // Short term e.g. "Kramat Jati" — if multiple matches, pick the one
+      // whose text contains the city part (after comma) from the full term.
+      // Try Select2 AJAX config first, fallback to hardcoded endpoint
+      let ajaxUrl = '/SIPP/kua/cari';
+      let ajaxType = 'post';
+      try {
+        const $kuaSel = jQuery('#ref_kua');
+        const ajaxConfig = $kuaSel.data('select2')?.options?.options?.ajax;
+        if (ajaxConfig?.url) { ajaxUrl = ajaxConfig.url; ajaxType = ajaxConfig.type || 'post'; }
+      } catch(_) {}
 
-          // Try multiple search terms: full, short (before comma), and first word only
-          const fullTerm = mi.kua_dicatat;
-          const shortTerm = fullTerm.split(',')[0].trim();
-          const firstWord = shortTerm.split(/\s+/)[0];
-          const terms = [...new Set([fullTerm, shortTerm, firstWord])];
+      const fullTerm = mi.kua_dicatat;
+      const shortTerm = fullTerm.split(',')[0].trim();
+      const cityPart = fullTerm.includes(',') ? fullTerm.split(',').slice(1).join(',').trim() : '';
+      const url = ajaxUrl || '/SIPP/kua/cari';
 
-          console.log('[SIPP KUA] strategies 1-2 failed, trying AJAX with terms:', terms);
+      console.log('[SIPP KUA] AJAX strategy — full:', fullTerm, '| short:', shortTerm, '| city:', cityPart);
 
-          for (const term of terms) {
-            if (found) break;
-            const url = ajaxUrl || '/SIPP/kua/cari';
-            console.log('[SIPP KUA] POST', url, 'term:', term);
-            const response = await new Promise((resolve) => {
-              jQuery.ajax({
-                url,
-                type: ajaxType,
-                dataType: 'json',
-                data: { term },
-                success: (r) => {
-                  console.log('[SIPP KUA] response for', term, ':', r);
-                  resolve(Array.isArray(r) ? r : []);
-                },
-                error: (xhr, status, err) => {
-                  console.log('[SIPP KUA] AJAX error:', status, err, 'url:', url);
-                  resolve([]);
-                },
-              });
-            });
-            if (!response.length) continue;
-            const v = term.toLowerCase().replace(/\s+/g, '');
-            const match = response.find((item) => {
-              const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
-              return t.includes(v) || v.includes(t) || String(item.text || '').toLowerCase().includes(term.toLowerCase());
-            });
-            console.log('[SIPP KUA] match result:', match);
-            if (match?.id) {
-              if (!$kua.find(`option[value="${match.id}"]`).length) {
-                $kua.append(new Option(match.text, match.id, true, true));
-              }
-              $kua.val(match.id).trigger('change');
-              const $container = jQuery('#select2-ref_kua-container');
-              if ($container.length) {
-                $container.attr('title', match.text).text(match.text);
-              }
-              found = true;
-            }
-          }
-        } catch(e) {
-          console.log('[SIPP KUA] strategy 3 error:', e);
-          result.errors.push('KUA AJAX: ' + e.message);
+      // Step 1: try full term
+      let response = await new Promise((resolve) => {
+        jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: fullTerm },
+          success: (r) => { console.log('[SIPP KUA] full response:', r); resolve(Array.isArray(r) ? r : []); },
+          error: () => resolve([]),
+        });
+      });
+
+      let match = response.find((item) => {
+        const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
+        const v = fullTerm.toLowerCase().replace(/\s+/g, '');
+        return t === v || t.includes(v) || v.includes(t);
+      });
+
+      // Step 2: if no match, try short term
+      if (!match && shortTerm !== fullTerm) {
+        response = await new Promise((resolve) => {
+          jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: shortTerm },
+            success: (r) => { console.log('[SIPP KUA] short response:', r); resolve(Array.isArray(r) ? r : []); },
+            error: () => resolve([]),
+          });
+        });
+        const v = shortTerm.toLowerCase().replace(/\s+/g, '');
+        const candidates = response.filter((item) => {
+          const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
+          return t.includes(v) || v.includes(t);
+        });
+        console.log('[SIPP KUA] candidates:', candidates);
+        if (candidates.length === 1) {
+          match = candidates[0];
+        } else if (candidates.length > 1 && cityPart) {
+          // Disambiguate: pick the one whose text contains the city name
+          match = candidates.find((item) =>
+            String(item.text || '').toLowerCase().includes(cityPart.toLowerCase())
+          ) || null;
+          console.log('[SIPP KUA] disambiguated:', match);
         }
+      }
+
+      // Step 3: if still no match, try first word only (last resort)
+      if (!match && shortTerm.split(/\s+/).length > 1) {
+        const firstWord = shortTerm.split(/\s+/)[0];
+        response = await new Promise((resolve) => {
+          jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: firstWord },
+            success: (r) => { console.log('[SIPP KUA] firstWord response:', r); resolve(Array.isArray(r) ? r : []); },
+            error: () => resolve([]),
+          });
+        });
+        const v = firstWord.toLowerCase();
+        match = response.find((item) => {
+          const t = String(item.text || '').toLowerCase();
+          return t.includes(v) || v.includes(t);
+        }) || null;
+      }
+
+      if (match?.id) {
+        if (!$kua.find(`option[value="${match.id}"]`).length) {
+          $kua.append(new Option(match.text, match.id, true, true));
+        }
+        $kua.val(match.id).trigger('change');
+        const $container = jQuery('#select2-ref_kua-container');
+        if ($container.length) {
+          $container.attr('title', match.text).text(match.text);
+        }
+        found = true;
+        console.log('[SIPP KUA] ✅ selected:', match.text, 'id:', match.id);
+      } else {
+        console.log('[SIPP KUA] ❌ no match found for:', fullTerm);
       }
       if (found) result.filledFields++;
       else result.errors.push('KUA Dicatat: tidak ditemukan (' + mi.kua_dicatat + ')');
