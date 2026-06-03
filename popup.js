@@ -405,27 +405,61 @@ async function fillSippMainWorld(data) {
       return text.replace(/<p(\s[^>]*)?>/gi, '<p$1 style="text-align:justify">')
                  .replace(/<li(\s[^>]*)?>/gi, '<li$1 style="text-align:justify">');
     }
-    // Convert plain text with numbered list to HTML
+    // Convert plain text with numbered list + sub-numbering to HTML
+    // Supports: 1. 2. (main) + a. b. c. or i. ii. iii. (sub) + 1.1 1.2 (sub)
     const lines = text.split(/\r?\n/);
     let html = '';
     let inOl = false;
+    let inSubOl = false;
+    let liOpen = false; // track if main <li> is open (waiting for sub-items)
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) {
+        if (inSubOl) { html += '</ol>'; inSubOl = false; }
+        if (liOpen) { html += '</li>'; liOpen = false; }
         if (inOl) { html += '</ol>'; inOl = false; }
         html += '<p style="text-align:justify">&nbsp;</p>';
         continue;
       }
-      // Numbered item: "1." "2." etc.
+      // Main numbered item: "1." "2." etc.
       const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
+      // Sub-numbered item: "a." "b." "i." "ii." or "1.1" "1.2" etc.
+      const subAlphaMatch = trimmed.match(/^([a-z])[.)]\s*(.+)/i);
+      const subDecimalMatch = trimmed.match(/^(\d+\.\d+)[.)]?\s*(.+)/);
+
       if (numMatch) {
+        // Close previous sub-list and <li> if open
+        if (inSubOl) { html += '</ol>'; inSubOl = false; }
+        if (liOpen) { html += '</li>'; liOpen = false; }
         if (!inOl) { html += '<ol>'; inOl = true; }
-        html += `<li style="text-align:justify">${numMatch[2]}</li>`;
+        // Open new <li> but don't close yet (sub-items may follow)
+        html += `<li style="text-align:justify">${numMatch[2]}`;
+        liOpen = true;
+      } else if (subAlphaMatch && inOl) {
+        // Sub-item under a main item: open nested <ol> inside last <li>
+        if (!inSubOl) {
+          html += '<ol style="list-style-type:lower-alpha">';
+          inSubOl = true;
+        }
+        html += `<li style="text-align:justify">${subAlphaMatch[2]}</li>`;
+      } else if (subDecimalMatch && inOl) {
+        // Decimal sub-item: "1.1 description"
+        if (!inSubOl) {
+          html += '<ol style="list-style-type:decimal">';
+          inSubOl = true;
+        }
+        html += `<li style="text-align:justify">${subDecimalMatch[2]}</li>`;
       } else {
+        // Close any open lists
+        if (inSubOl) { html += '</ol>'; inSubOl = false; }
+        if (liOpen) { html += '</li>'; liOpen = false; }
         if (inOl) { html += '</ol>'; inOl = false; }
         html += `<p style="text-align:justify">${trimmed}</p>`;
       }
     }
+    // Close any remaining open lists
+    if (inSubOl) html += '</ol>';
+    if (liOpen) html += '</li>';
     if (inOl) html += '</ol>';
     return html;
   }
@@ -571,12 +605,16 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.posita);
           CKEDITOR.instances['posita'].setData(html);
-          // Force justify on all paragraphs via CKEditor command
+          // Force justify + sub-list style via DOM
           try {
             const body = CKEDITOR.instances['posita'].editable();
             if (body) {
               body.$.querySelectorAll('p,li').forEach(el => {
                 el.style.textAlign = 'justify';
+              });
+              // Force lower-alpha on nested <ol> for sub-numbering
+              body.$.querySelectorAll('ol ol').forEach(ol => {
+                ol.style.listStyleType = 'lower-alpha';
               });
             }
           } catch(je) {}
@@ -601,12 +639,16 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.petitum);
           CKEDITOR.instances['petitum'].setData(html);
-          // Force justify on all paragraphs via CKEditor command
+          // Force justify + sub-list style via DOM
           try {
             const body = CKEDITOR.instances['petitum'].editable();
             if (body) {
               body.$.querySelectorAll('p,li').forEach(el => {
                 el.style.textAlign = 'justify';
+              });
+              // Force lower-alpha on nested <ol> for sub-numbering
+              body.$.querySelectorAll('ol ol').forEach(ol => {
+                ol.style.listStyleType = 'lower-alpha';
               });
             }
           } catch(je) {}
