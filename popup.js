@@ -393,8 +393,34 @@ async function fillSippMainWorld(data) {
   console.log('[SIPP MAIN] marriage_info:', data.marriage_info);
   console.log('[SIPP MAIN] tanggal_surat:', data.tanggal_surat);
   const result = { filledFields: 0, errors: [] };
-  const isDataAnakForm = !!document.querySelector('form[action*="addAnakPihak"], #frm_user #anak_ke, #frm_user #tgl_lahir');
-  console.log('[SIPP MAIN] isDataAnakForm:', isDataAnakForm);
+
+  // Helper: check if an element (or any ancestor) is hidden via display:none / visibility:hidden
+  function isNodeVisible(node) {
+    if (!node) return false;
+    let el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el) return false;
+    try {
+      let cur = el;
+      while (cur && cur !== document) {
+        const s = window.getComputedStyle(cur);
+        if (s.display === 'none' || s.visibility === 'hidden') return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    } catch(e) { return true; }
+  }
+
+  // Only treat the Data Anak form as "open" when its elements are actually visible.
+  // Previously this used a bare querySelector which matched even when the popup was
+  // closed but DOM nodes still existed — causing tanggal_surat/posita/petitum to be
+  // silently skipped on the main form.
+  const _daForm = document.querySelector('form[action*="addAnakPihak"]');
+  const _daAnakKe = document.querySelector('#frm_user #anak_ke');
+  const _daTglLahir = document.querySelector('#frm_user #tgl_lahir');
+  const isDataAnakForm = (_daForm && isNodeVisible(_daForm)) ||
+                          (_daAnakKe && isNodeVisible(_daAnakKe)) ||
+                          (_daTglLahir && isNodeVisible(_daTglLahir));
+  console.log('[SIPP MAIN] isDataAnakForm:', isDataAnakForm, '(form:', !!_daForm, 'visible:', _daForm ? isNodeVisible(_daForm) : 'n/a', ')');
 
   // Convert plain text posita/petitum to HTML for CKEditor
   function textToHtml(text) {
