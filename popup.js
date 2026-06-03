@@ -751,6 +751,7 @@ async function fillSippMainWorld(data) {
 
       // Strategy 3: AJAX lookup for KUA not in preloaded options.
       // SIPP only preloads the current KUA; others need /SIPP/kua/cari POST.
+      // Note: SIPP may store "Kramatjati" while data has "Kramat Jati" (space diff).
       if (!found && typeof jQuery !== 'undefined') {
         try {
           const $kua = jQuery('#ref_kua');
@@ -763,29 +764,41 @@ async function fillSippMainWorld(data) {
             ajaxType = ajaxConfig?.type || 'post';
           } catch(_) {}
 
-          // Also try shorter term (just "Kramat Jati" without city)
+          // Try multiple search terms: full, short (before comma), and first word only
           const fullTerm = mi.kua_dicatat;
           const shortTerm = fullTerm.split(',')[0].trim();
-          const terms = [fullTerm, shortTerm];
+          const firstWord = shortTerm.split(/\s+/)[0];
+          const terms = [...new Set([fullTerm, shortTerm, firstWord])];
+
+          console.log('[SIPP KUA] strategies 1-2 failed, trying AJAX with terms:', terms);
 
           for (const term of terms) {
             if (found) break;
             const url = ajaxUrl || '/SIPP/kua/cari';
+            console.log('[SIPP KUA] POST', url, 'term:', term);
             const response = await new Promise((resolve) => {
               jQuery.ajax({
                 url,
                 type: ajaxType,
                 dataType: 'json',
                 data: { term },
-                success: (r) => resolve(Array.isArray(r) ? r : []),
-                error: () => resolve([]),
+                success: (r) => {
+                  console.log('[SIPP KUA] response for', term, ':', r);
+                  resolve(Array.isArray(r) ? r : []);
+                },
+                error: (xhr, status, err) => {
+                  console.log('[SIPP KUA] AJAX error:', status, err, 'url:', url);
+                  resolve([]);
+                },
               });
             });
+            if (!response.length) continue;
             const v = term.toLowerCase().replace(/\s+/g, '');
             const match = response.find((item) => {
               const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
               return t.includes(v) || v.includes(t) || String(item.text || '').toLowerCase().includes(term.toLowerCase());
             });
+            console.log('[SIPP KUA] match result:', match);
             if (match?.id) {
               if (!$kua.find(`option[value="${match.id}"]`).length) {
                 $kua.append(new Option(match.text, match.id, true, true));
@@ -799,6 +812,7 @@ async function fillSippMainWorld(data) {
             }
           }
         } catch(e) {
+          console.log('[SIPP KUA] strategy 3 error:', e);
           result.errors.push('KUA AJAX: ' + e.message);
         }
       }
