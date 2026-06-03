@@ -749,28 +749,42 @@ async function fillSippMainWorld(data) {
         }
       }
 
-      // Strategy 3: Select2 AJAX lookup. SIPP only preloads the current KUA option;
-      // other KUA values (e.g. Cipayung) must be fetched from /kua/cari before selection.
+      // Strategy 3: AJAX lookup for KUA not in preloaded options.
+      // SIPP only preloads the current KUA; others need /SIPP/kua/cari POST.
       if (!found && typeof jQuery !== 'undefined') {
         try {
           const $kua = jQuery('#ref_kua');
-          const ajaxConfig = $kua.data('select2')?.options?.options?.ajax;
-          const url = ajaxConfig?.url;
-          if ($kua.length && url) {
+          // Try Select2 AJAX config first, fallback to hardcoded endpoint
+          let ajaxUrl = null;
+          let ajaxType = 'post';
+          try {
+            const ajaxConfig = $kua.data('select2')?.options?.options?.ajax;
+            ajaxUrl = ajaxConfig?.url || null;
+            ajaxType = ajaxConfig?.type || 'post';
+          } catch(_) {}
+
+          // Also try shorter term (just "Kramat Jati" without city)
+          const fullTerm = mi.kua_dicatat;
+          const shortTerm = fullTerm.split(',')[0].trim();
+          const terms = [fullTerm, shortTerm];
+
+          for (const term of terms) {
+            if (found) break;
+            const url = ajaxUrl || '/SIPP/kua/cari';
             const response = await new Promise((resolve) => {
               jQuery.ajax({
                 url,
-                type: ajaxConfig.type || 'post',
-                dataType: ajaxConfig.dataType || 'json',
-                data: { term: mi.kua_dicatat },
+                type: ajaxType,
+                dataType: 'json',
+                data: { term },
                 success: (r) => resolve(Array.isArray(r) ? r : []),
                 error: () => resolve([]),
               });
             });
-            const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
+            const v = term.toLowerCase().replace(/\s+/g, '');
             const match = response.find((item) => {
               const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
-              return t.includes(v) || v.includes(t) || String(item.text || '').toLowerCase().includes(mi.kua_dicatat.toLowerCase());
+              return t.includes(v) || v.includes(t) || String(item.text || '').toLowerCase().includes(term.toLowerCase());
             });
             if (match?.id) {
               if (!$kua.find(`option[value="${match.id}"]`).length) {
