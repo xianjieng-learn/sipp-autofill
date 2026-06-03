@@ -605,15 +605,24 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.posita);
           CKEDITOR.instances['posita'].setData(html);
-          // Force justify + sub-list style via DOM
+          // Force justify + sub-list style via injected <style> + DOM
           try {
             const body = CKEDITOR.instances['posita'].editable();
             if (body) {
-              body.$.querySelectorAll('p,li').forEach(el => {
+              const $ = body.$;
+              // Inject persistent <style> tag into CKEditor document
+              const existingStyle = $.getElementById('hermes-justify-css');
+              if (!existingStyle) {
+                const styleEl = $.createElement('style');
+                styleEl.setId('hermes-justify-css');
+                styleEl.$.textContent = 'p,li{text-align:justify!important}ol ol{list-style-type:lower-alpha!important}';
+                $.getHead().append(styleEl);
+              }
+              // Also force via DOM for immediate effect
+              $.querySelectorAll('p,li').forEach(el => {
                 el.style.textAlign = 'justify';
               });
-              // Force lower-alpha on nested <ol> for sub-numbering
-              body.$.querySelectorAll('ol ol').forEach(ol => {
+              $.querySelectorAll('ol ol').forEach(ol => {
                 ol.style.listStyleType = 'lower-alpha';
               });
             }
@@ -639,15 +648,24 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.petitum);
           CKEDITOR.instances['petitum'].setData(html);
-          // Force justify + sub-list style via DOM
+          // Force justify + sub-list style via injected <style> + DOM
           try {
             const body = CKEDITOR.instances['petitum'].editable();
             if (body) {
-              body.$.querySelectorAll('p,li').forEach(el => {
+              const $ = body.$;
+              // Inject persistent <style> tag into CKEditor document
+              const existingStyle = $.getElementById('hermes-justify-css');
+              if (!existingStyle) {
+                const styleEl = $.createElement('style');
+                styleEl.setId('hermes-justify-css');
+                styleEl.$.textContent = 'p,li{text-align:justify!important}ol ol{list-style-type:lower-alpha!important}';
+                $.getHead().append(styleEl);
+              }
+              // Also force via DOM for immediate effect
+              $.querySelectorAll('p,li').forEach(el => {
                 el.style.textAlign = 'justify';
               });
-              // Force lower-alpha on nested <ol> for sub-numbering
-              body.$.querySelectorAll('ol ol').forEach(ol => {
+              $.querySelectorAll('ol ol').forEach(ol => {
                 ol.style.listStyleType = 'lower-alpha';
               });
             }
