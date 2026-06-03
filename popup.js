@@ -429,12 +429,12 @@ async function fillSippMainWorld(data) {
       const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
 
       if (subDecimalMatch && inOl) {
-        // Decimal sub-item: "4.1 description" — must be inside a main list
+        // Decimal sub-item: "3.1 description" — prefix kept in text
         if (!inSubOl) {
-          html += '<ol style="list-style-type:decimal">';
+          html += '<ol>';
           inSubOl = true;
         }
-        html += `<li style="text-align:justify">${subDecimalMatch[2]}</li>`;
+        html += `<li style="text-align:justify">${subDecimalMatch[1]}. ${subDecimalMatch[2]}</li>`;
       } else if (subAlphaMatch && inOl) {
         // Sub-item under a main item: open nested <ol> inside last <li>
         if (!inSubOl) {
