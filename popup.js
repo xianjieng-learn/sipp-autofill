@@ -399,8 +399,12 @@ async function fillSippMainWorld(data) {
   // Convert plain text posita/petitum to HTML for CKEditor
   function textToHtml(text) {
     if (!text) return '';
-    // Already has HTML tags? Return as-is
-    if (/<[a-z][\s\S]*>/i.test(text)) return text;
+    // Already has HTML tags? Wrap each block in justify paragraph
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      // Add text-align:justify to existing <p> tags
+      return text.replace(/<p(\s[^>]*)?>/gi, '<p$1 style="text-align:justify">')
+                 .replace(/<li(\s[^>]*)?>/gi, '<li$1 style="text-align:justify">');
+    }
     // Convert plain text with numbered list to HTML
     const lines = text.split(/\r?\n/);
     let html = '';
@@ -409,14 +413,14 @@ async function fillSippMainWorld(data) {
       const trimmed = line.trim();
       if (!trimmed) {
         if (inOl) { html += '</ol>'; inOl = false; }
-        html += '<p>&nbsp;</p>';
+        html += '<p style="text-align:justify">&nbsp;</p>';
         continue;
       }
       // Numbered item: "1." "2." etc.
       const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
       if (numMatch) {
         if (!inOl) { html += '<ol>'; inOl = true; }
-        html += `<li>${numMatch[2]}</li>`;
+        html += `<li style="text-align:justify">${numMatch[2]}</li>`;
       } else {
         if (inOl) { html += '</ol>'; inOl = false; }
         html += `<p style="text-align:justify">${trimmed}</p>`;
@@ -567,6 +571,15 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.posita);
           CKEDITOR.instances['posita'].setData(html);
+          // Force justify on all paragraphs via CKEditor command
+          try {
+            const body = CKEDITOR.instances['posita'].editable();
+            if (body) {
+              body.$.querySelectorAll('p,li').forEach(el => {
+                el.style.textAlign = 'justify';
+              });
+            }
+          } catch(je) {}
           const ta = document.getElementById('posita');
           if (ta) ta.value = html;
           result.filledFields++;
@@ -588,6 +601,15 @@ async function fillSippMainWorld(data) {
         try {
           const html = textToHtml(data.petitum);
           CKEDITOR.instances['petitum'].setData(html);
+          // Force justify on all paragraphs via CKEditor command
+          try {
+            const body = CKEDITOR.instances['petitum'].editable();
+            if (body) {
+              body.$.querySelectorAll('p,li').forEach(el => {
+                el.style.textAlign = 'justify';
+              });
+            }
+          } catch(je) {}
           const ta = document.getElementById('petitum');
           if (ta) ta.value = html;
           result.filledFields++;
