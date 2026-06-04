@@ -90,17 +90,20 @@ function normalizeDate(value) {
     desember: '12', des: '12', dec: '12',
   };
 
-  // Examples: "Minggu, 15 Sep. 2002", "15 September 2002".
+  // Examples: "Minggu, 15 Sep. 2002", "15 September 2002", "4 Juni 26".
   const cleaned = raw
     .replace(/^(senin|selasa|rabu|kamis|jumat|jum'at|sabtu|minggu),?\s+/i, '')
     .replace(/\./g, '')
     .trim();
 
-  match = cleaned.match(/\b(\d{1,2})\s+([A-Za-zÀ-ÿ']+)\s+(\d{4})\b/);
+  match = cleaned.match(/\b(\d{1,2})\s+([A-Za-zÀ-ÿ']+)\s+(\d{2,4})\b/);
   if (match) {
-    const [, d, monthName, y] = match;
+    let [, d, monthName, y] = match;
     const m = months[monthName.toLowerCase()];
-    if (m) return `${d.padStart(2, '0')}/${m}/${y}`;
+    if (m) {
+      if (y.length === 2) y = `20${y}`;
+      return `${d.padStart(2, '0')}/${m}/${y}`;
+    }
   }
 
   return raw;
@@ -163,7 +166,25 @@ function normalizeData(data) {
   result.posita = pickValue(data, ['posita', 'dalil', 'alasan']);
   result.petitum = pickValue(data, ['petitum', 'tuntutan', 'amar']);
   result.obyek_sengketa = pickValue(data, ['obyek_sengketa', 'objek_sengketa', 'obyek_gugatan', 'objek_gugatan']) || '-';
-  result.tanggal_surat = normalizeDate(pickValue(data, ['tanggal_surat', 'tgl_surat', 'data_umum.tanggal_surat', 'data_umum.tgl_surat']));
+  result.tanggal_surat = normalizeDate(pickValue(data, [
+    'tanggal_surat',
+    'tgl_surat',
+    'tanggalSurat',
+    'tglSurat',
+    'surat_tanggal',
+    'tanggal_permohonan',
+    'tanggal_gugatan',
+    'tgl_permohonan',
+    'tgl_gugatan',
+    'data_umum.tanggal_surat',
+    'data_umum.tgl_surat',
+    'data_umum.tanggalSurat',
+    'data_umum.tglSurat',
+    'data_umum.tanggal_permohonan',
+    'data_umum.tanggal_gugatan',
+    'surat.tanggal',
+    'surat.tgl_surat',
+  ]));
 
   const marriageSource = (data.marriage_info && typeof data.marriage_info === 'object')
     ? data.marriage_info
@@ -349,6 +370,7 @@ function renderPreview(data) {
     `;
 
     const fields = [
+      ['Tanggal Surat', data.tanggal_surat],
       ['Tanggal Menikah', data.marriage_info.tanggal_menikah],
       ['Tanggal Dicatat', data.marriage_info.tanggal_dicatat],
       ['No. Akta Nikah', data.marriage_info.nomor_akta_nikah],
@@ -605,31 +627,42 @@ async function fillSippMainWorld(data) {
     if (!select || !option) return false;
 
     const options = Array.from(select.options || []);
+    const optionIndex = options.indexOf(option);
+    const duplicateValue = options.filter(o => String(o.value) === String(option.value)).length > 1;
+
     options.forEach(o => { o.selected = false; });
     option.selected = true;
-    select.selectedIndex = options.indexOf(option);
+    if (optionIndex >= 0) select.selectedIndex = optionIndex;
 
-    // Important: use selectedIndex, not only select.value.
-    // Some SIPP selects contain duplicate option values.
-    if (option.value !== undefined) {
+    // Do NOT blindly set select.value when duplicate values exist.
+    // SIPP's #diasuh_oleh has duplicate value="3" for "Orang tua P atau T" and "lain-lain".
+    // Setting select.value = "3" reselects the first option and breaks "lain-lain".
+    if (!duplicateValue && option.value !== undefined) {
       select.value = option.value;
     }
 
     if (typeof jQuery !== 'undefined') {
       try {
         const $sel = jQuery(select);
-        $sel.val(option.value).trigger('input').trigger('change').trigger('blur');
         if ($sel.data('select2')) {
+          $sel.val(option.value).trigger('input').trigger('change').trigger('blur');
           $sel.trigger({
             type: 'select2:select',
             params: { data: { id: option.value, text: option.textContent || option.text || '' } },
           });
+        } else {
+          // Preserve selectedIndex for normal SIPP selects, especially duplicate values.
+          if (optionIndex >= 0) select.selectedIndex = optionIndex;
+          option.selected = true;
+          $sel.trigger('input').trigger('change').trigger('blur');
         }
       } catch (e) {
         console.warn('[SIPP selectOption] jQuery/Select2 error:', e.message);
       }
     }
 
+    if (optionIndex >= 0) select.selectedIndex = optionIndex;
+    option.selected = true;
     select.dispatchEvent(new Event('input', { bubbles: true }));
     select.dispatchEvent(new Event('change', { bubbles: true }));
 
@@ -692,6 +725,7 @@ async function fillSippMainWorld(data) {
       'orang tua p/t': 'orang tua p atau t',
       'orang tua p atau t': 'orang tua p atau t',
       'lain lain': 'lain-lain',
+      'lain-lain': 'lain-lain',
       lainnya: 'lain-lain',
       'laki laki': 'laki-laki',
       'laki-laki': 'laki-laki',
@@ -710,7 +744,16 @@ async function fillSippMainWorld(data) {
     const expanded = shorthandMap[v] || v;
     const options = Array.from(select.options || []);
 
-    let opt = options.find(o => String(o.value) === raw);
+    // Prefer exact text match for diasuh_oleh because SIPP duplicates value="3".
+    let opt = null;
+    if (isDiasuh) {
+      opt = options.find(o => normalize(o.textContent || o.text) === expanded) ||
+        options.find(o => compact(o.textContent || o.text) === compact(expanded));
+    }
+
+    if (!opt) {
+      opt = options.find(o => String(o.value) === raw);
+    }
 
     if (!opt) {
       opt = options.find(o => {
@@ -850,7 +893,6 @@ async function fillSippMainWorld(data) {
       return false;
     }
 
-    // 1) Existing options. In SIPP edit form, the current KUA is often already injected as an option.
     const existingOptions = Array.from(select.options || []);
     let existingMatch = existingOptions.find(opt => {
       const text = opt.textContent || opt.text || '';
@@ -862,7 +904,6 @@ async function fillSippMainWorld(data) {
       return true;
     }
 
-    // 2) Use Select2 UI search. This is safer because it reuses SIPP's real AJAX config.
     if (typeof jQuery !== 'undefined') {
       const $select = jQuery(select);
 
@@ -924,7 +965,6 @@ async function fillSippMainWorld(data) {
       }
     }
 
-    // 3) Direct AJAX fallback. Try configured Select2 URL first, then known/likely SIPP variants.
     if (typeof jQuery !== 'undefined') {
       const ajaxConfigs = [];
       try {
@@ -1007,9 +1047,10 @@ async function fillSippMainWorld(data) {
   // Fill main Data Umum form only when Data Anak popup is not active.
   if (!isDataAnakForm) {
     if (data.tanggal_surat) {
-      const el = document.getElementById('tgl_surat');
+      const el = document.getElementById('tgl_surat') ||
+        document.querySelector('input[name="tgl_surat" i], input[id*="tgl_surat" i], input[name*="tanggal_surat" i], input[id*="tanggal_surat" i]');
       if (el && setVal(el, data.tanggal_surat)) result.filledFields++;
-      else result.errors.push('Tanggal Surat: #tgl_surat tidak ditemukan');
+      else result.errors.push('Tanggal Surat: field #tgl_surat tidak ditemukan. Buka popup Edit Data Umum terlebih dahulu.');
     }
 
     if (data.marriage_info) {
