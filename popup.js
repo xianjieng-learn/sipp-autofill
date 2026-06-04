@@ -343,15 +343,23 @@ async function fillSippMainWorld(data) {
       .replace(/\bkua\b/g, ' ')
       .replace(/\bkecamatan\b/g, ' ')
       .replace(/\bkec\b/g, ' ')
-      .replace(/\bkota adm\b/g, ' ')
-      .replace(/\bkota administrasi\b/g, ' ')
+      .replace(/\badm\b/g, ' ')
+      .replace(/\badministrasi\b/g, ' ')
       .replace(/\bkota\b/g, ' ')
       .replace(/\bkabupaten\b/g, ' ')
       .replace(/\bkab\b/g, ' ')
       .replace(/\bprovinsi\b/g, ' ')
       .replace(/\bpropinsi\b/g, ' ')
+      .replace(/\bdaerah khusus ibukota\b/g, ' ')
+      .replace(/\bdki\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  function tokenSubset(small, big) {
+    const smallTokens = cleanKua(small).split(/\s+/).filter(t => t.length > 2);
+    const bigTokens = cleanKua(big).split(/\s+/).filter(t => t.length > 2);
+    return smallTokens.length > 0 && smallTokens.every(t => bigTokens.includes(t));
   }
 
   function kuaMatches(optionText, wantedText) {
@@ -363,7 +371,8 @@ async function fillSippMainWorld(data) {
     return optionNorm === wantedNorm || optionNorm.includes(wantedNorm) || wantedNorm.includes(optionNorm) ||
       compact(optionNorm).includes(compact(wantedNorm)) || compact(wantedNorm).includes(compact(optionNorm)) ||
       optionClean === wantedClean || optionClean.includes(wantedClean) || wantedClean.includes(optionClean) ||
-      compact(optionClean).includes(compact(wantedClean)) || compact(wantedClean).includes(compact(optionClean));
+      compact(optionClean).includes(compact(wantedClean)) || compact(wantedClean).includes(compact(optionClean)) ||
+      tokenSubset(wantedText, optionText) || tokenSubset(optionText, wantedText);
   }
 
   function selectOption(select, option, displayText) {
@@ -397,6 +406,7 @@ async function fillSippMainWorld(data) {
     const fieldKey = norm(`${select.id || ''} ${select.name || ''}`);
     const isDiasuh = fieldKey.includes('diasuh');
     const isJenisKelamin = fieldKey.includes('jenis kelamin') || fieldKey.includes('jeniskelamin');
+    const isPendidikan = fieldKey.includes('pendidikan');
 
     const map = {
       sd: 'sekolah dasar', smp: 'sekolah lanjutan tingkat pertama', sltp: 'sekolah lanjutan tingkat pertama', mts: 'sekolah lanjutan tingkat pertama',
@@ -408,16 +418,33 @@ async function fillSippMainWorld(data) {
       'orang tua p atau t': 'orang tua p atau t', 'lain lain': 'lain-lain', 'lain-lain': 'lain-lain', lainnya: 'lain-lain',
       'laki laki': 'laki-laki', 'laki-laki': 'laki-laki', perempuan: 'perempuan',
     };
-    if (isDiasuh && valueNorm === 'p') map[valueNorm] = 'penggugat/pemohon';
-    if (isDiasuh && valueNorm === 't') map[valueNorm] = 'tergugat/termohon';
-    if (isJenisKelamin && ['l', 'lk'].includes(valueNorm)) map[valueNorm] = 'laki-laki';
-    if (isJenisKelamin && ['p', 'pr'].includes(valueNorm)) map[valueNorm] = 'perempuan';
 
-    const wanted = map[valueNorm] || valueNorm;
+    let wanted = map[valueNorm] || valueNorm;
+
+    if (isDiasuh) {
+      if (valueNorm.includes('penggugat') || valueNorm.includes('pemohon')) wanted = 'penggugat/pemohon';
+      else if (valueNorm.includes('tergugat') || valueNorm.includes('termohon')) wanted = 'tergugat/termohon';
+      else if (valueNorm === 'p') wanted = 'penggugat/pemohon';
+      else if (valueNorm === 't') wanted = 'tergugat/termohon';
+    }
+
+    if (isPendidikan) {
+      if (valueNorm.includes('belum sekolah') || valueNorm.includes('tidak sekolah') || valueNorm.includes('belum tamat')) wanted = 'tidak ada';
+      else if (/\bsd\b/.test(valueNorm)) wanted = 'sekolah dasar';
+      else if (/\b(smp|sltp|mts)\b/.test(valueNorm)) wanted = 'sekolah lanjutan tingkat pertama';
+      else if (/\b(sma|smk|slta|ma)\b/.test(valueNorm)) wanted = 'sekolah lanjutan tingkat atas';
+    }
+
+    if (isJenisKelamin) {
+      if (['l', 'lk'].includes(valueNorm)) wanted = 'laki-laki';
+      if (['p', 'pr'].includes(valueNorm)) wanted = 'perempuan';
+    }
+
     const options = Array.from(select.options || []);
-
     let option = null;
-    if (isDiasuh) option = options.find(o => norm(o.textContent || o.text) === wanted || compact(o.textContent || o.text) === compact(wanted));
+    if (isDiasuh || isPendidikan || isJenisKelamin) {
+      option = options.find(o => norm(o.textContent || o.text) === wanted || compact(o.textContent || o.text) === compact(wanted));
+    }
     if (!option) option = options.find(o => String(o.value) === raw);
     if (!option) option = options.find(o => {
       const t = norm(o.textContent || o.text);
@@ -436,9 +463,9 @@ async function fillSippMainWorld(data) {
     let html = '';
     let inMainOl = false;
     let currentMainOpen = false;
-    let inSubOl = false;
+    let inSubList = false;
 
-    const closeSub = () => { if (inSubOl) { html += '</ol>'; inSubOl = false; } };
+    const closeSub = () => { if (inSubList) { html += '</ul>'; inSubList = false; } };
     const closeMainLi = () => { if (currentMainOpen) { closeSub(); html += '</li>'; currentMainOpen = false; } };
     const closeMainOl = () => { closeMainLi(); if (inMainOl) { html += '</ol>'; inMainOl = false; } };
 
@@ -455,14 +482,14 @@ async function fillSippMainWorld(data) {
       const main = line.match(/^(\d+)[.)]\s+(.+)$/);
 
       if (subDecimal && currentMainOpen) {
-        if (!inSubOl) { html += '<ol style="list-style-type:none;margin-left:20px;padding-left:0">'; inSubOl = true; }
+        if (!inSubList) { html += '<ul style="list-style-type:none;margin-left:20px;padding-left:0">'; inSubList = true; }
         html += `<li style="text-align:justify">${line}</li>`;
         continue;
       }
 
       if (subAlpha && currentMainOpen) {
-        if (!inSubOl) { html += '<ol style="list-style-type:lower-alpha">'; inSubOl = true; }
-        html += `<li style="text-align:justify">${subAlpha[2]}</li>`;
+        if (!inSubList) { html += '<ul style="list-style-type:none;margin-left:20px;padding-left:0">'; inSubList = true; }
+        html += `<li style="text-align:justify">${subAlpha[1]}. ${subAlpha[2]}</li>`;
         continue;
       }
 
@@ -507,19 +534,51 @@ async function fillSippMainWorld(data) {
       return false;
     }
 
-    // The uploaded HTML shows the wanted KUA is often already present as an <option> in #ref_kua.
-    const optionFromExisting = Array.from(select.options || []).find(o => o.value && kuaMatches(o.textContent || o.text, wanted));
+    const existing = Array.from(select.options || []);
+    const optionFromExisting = existing.find(o => o.value && kuaMatches(o.textContent || o.text, wanted));
     if (optionFromExisting && selectOption(select, optionFromExisting)) return true;
 
-    // If JSON only says "Matraman", still match existing full option.
-    const cleanWanted = cleanKua(wanted);
-    const optionByDistrict = Array.from(select.options || []).find(o => o.value && cleanKua(o.textContent || o.text).includes(cleanWanted));
+    const district = cleanKua(wanted).split(/\s+/).find(Boolean) || wanted;
+    const optionByDistrict = existing.find(o => o.value && cleanKua(o.textContent || o.text).split(/\s+/).includes(district));
     if (optionByDistrict && selectOption(select, optionByDistrict)) return true;
 
-    // Fallback: insert a visible option using the supplied text. This is better than leaving Select2 blank.
-    const inserted = new Option(wanted, wanted, true, true);
-    select.appendChild(inserted);
-    return selectOption(select, inserted, wanted);
+    // Select2 AJAX search. This keeps the real SIPP KUA id when the option is not preloaded.
+    if (typeof jQuery !== 'undefined' && jQuery(select).data('select2')) {
+      const $select = jQuery(select);
+      const terms = [wanted, cleanKua(wanted), district].filter((v, i, arr) => v && arr.indexOf(v) === i);
+      for (const term of terms) {
+        try {
+          $select.select2('open');
+          await delay(250);
+          const input = document.querySelector('.select2-container--open .select2-search__field');
+          if (!input) continue;
+          input.value = term;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: term.slice(-1) || 'a' }));
+          jQuery(input).val(term).trigger('input').trigger('keyup');
+          await delay(1200);
+
+          const results = Array.from(document.querySelectorAll('.select2-results__option')).filter(el => {
+            const t = norm(el.textContent);
+            return t && !t.includes('mencari') && !t.includes('searching') && !t.includes('tidak ditemukan') && !t.includes('no results');
+          });
+          const resultOption = results.find(el => kuaMatches(el.textContent, wanted)) || results.find(el => kuaMatches(el.textContent, term));
+          if (resultOption) {
+            resultOption.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            resultOption.click();
+            await delay(250);
+            const selectedText = document.getElementById('select2-ref_kua-container')?.textContent || '';
+            if (selectedText && kuaMatches(selectedText, wanted)) return true;
+            const refreshed = Array.from(select.options || []).find(o => o.selected || kuaMatches(o.textContent || o.text, wanted));
+            if (refreshed && selectOption(select, refreshed)) return true;
+          }
+          try { $select.select2('close'); } catch (_) {}
+        } catch (_) {}
+      }
+    }
+
+    result.errors.push(`KUA Tempat Menikah: tidak ditemukan/terpilih (${wanted}). Coba buka dropdown KUA manual sekali, lalu klik Fill lagi.`);
+    return false;
   }
 
   if (!isDataAnakForm) {
