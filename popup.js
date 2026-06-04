@@ -524,6 +524,75 @@ async function fillSippMainWorld(data) {
     return textarea ? setVal(textarea, html) : false;
   }
 
+  function dispatchTyping(input, term) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    input.focus();
+    input.click();
+    try { setter ? setter.call(input, '') : (input.value = ''); } catch (_) { input.value = ''; }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    try { setter ? setter.call(input, term) : (input.value = term); } catch (_) { input.value = term; }
+
+    ['keydown', 'keypress', 'input', 'keyup', 'change'].forEach(type => {
+      const ev = type.startsWith('key')
+        ? new KeyboardEvent(type, { bubbles: true, cancelable: true, key: term.slice(-1) || 'g', code: 'KeyG', keyCode: 71, which: 71 })
+        : new Event(type, { bubbles: true, cancelable: true });
+      input.dispatchEvent(ev);
+    });
+
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(input).val(term).trigger('keydown').trigger('keypress').trigger('input').trigger('keyup').trigger('change'); } catch (_) {}
+    }
+  }
+
+  function clickLikeUser(el) {
+    if (!el) return false;
+    ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(type => {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+    try { el.click(); } catch (_) {}
+    return true;
+  }
+
+  function findKuaSearchInput() {
+    return document.querySelector('.select2-container--open .select2-search__field') ||
+      document.querySelector('input[aria-controls="select2-ref_kua-results"]') ||
+      document.querySelector('.select2-container--open input[type="search"]') ||
+      document.querySelector('.select2-container--open input[type="text"]') ||
+      document.querySelector('input.select2-search__field') ||
+      document.querySelector('.select2-search input') ||
+      document.querySelector('input[role="searchbox"]');
+  }
+
+  function findKuaResult(wanted, term) {
+    const selectors = [
+      '#select2-ref_kua-results .select2-results__option',
+      '.select2-results__option[role="option"]',
+      '.select2-results__option',
+      '.select2-results li',
+      '.select2-result',
+      '.select2-result-label',
+      'ul.ui-autocomplete li',
+      '.ui-menu-item',
+      '.ac_results li',
+      '.autocomplete-suggestions div',
+      '.autocomplete-suggestion'
+    ].join(',');
+
+    const items = Array.from(document.querySelectorAll(selectors)).filter(el => {
+      const text = norm(el.textContent);
+      return text && !text.includes('mencari') && !text.includes('searching') && !text.includes('tidak ditemukan') && !text.includes('no results');
+    });
+
+    let match = items.find(el => kuaMatches(el.textContent, wanted)) || items.find(el => kuaMatches(el.textContent, term));
+    if (!match) return null;
+
+    if (match.classList.contains('select2-result-label')) {
+      return match.closest('li, .select2-result') || match;
+    }
+    return match;
+  }
+
   async function fillKua(value) {
     const wanted = String(value || '').trim();
     if (!wanted) return false;
@@ -542,42 +611,44 @@ async function fillSippMainWorld(data) {
     const optionByDistrict = existing.find(o => o.value && cleanKua(o.textContent || o.text).split(/\s+/).includes(district));
     if (optionByDistrict && selectOption(select, optionByDistrict)) return true;
 
-    // Select2 AJAX search. This keeps the real SIPP KUA id when the option is not preloaded.
-    if (typeof jQuery !== 'undefined' && jQuery(select).data('select2')) {
-      const $select = jQuery(select);
-      const terms = [wanted, cleanKua(wanted), district].filter((v, i, arr) => v && arr.indexOf(v) === i);
-      for (const term of terms) {
-        try {
-          $select.select2('open');
-          await delay(250);
-          const input = document.querySelector('.select2-container--open .select2-search__field');
-          if (!input) continue;
-          input.value = term;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: term.slice(-1) || 'a' }));
-          jQuery(input).val(term).trigger('input').trigger('keyup');
-          await delay(1200);
+    const terms = [district, wanted.split(',')[0].trim(), cleanKua(wanted), wanted]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i);
 
-          const results = Array.from(document.querySelectorAll('.select2-results__option')).filter(el => {
-            const t = norm(el.textContent);
-            return t && !t.includes('mencari') && !t.includes('searching') && !t.includes('tidak ditemukan') && !t.includes('no results');
-          });
-          const resultOption = results.find(el => kuaMatches(el.textContent, wanted)) || results.find(el => kuaMatches(el.textContent, term));
-          if (resultOption) {
-            resultOption.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-            resultOption.click();
-            await delay(250);
-            const selectedText = document.getElementById('select2-ref_kua-container')?.textContent || '';
-            if (selectedText && kuaMatches(selectedText, wanted)) return true;
-            const refreshed = Array.from(select.options || []).find(o => o.selected || kuaMatches(o.textContent || o.text, wanted));
-            if (refreshed && selectOption(select, refreshed)) return true;
-          }
-          try { $select.select2('close'); } catch (_) {}
-        } catch (_) {}
-      }
+    for (const term of terms) {
+      try {
+        // Open Select2 the way a user does. Do not rely only on jQuery(select).data('select2'),
+        // because SIPP sometimes initializes Select2 inside a popup after the extension loads.
+        const container = document.getElementById('select2-ref_kua-container') ||
+          document.querySelector('#ref_kua + .select2 .select2-selection') ||
+          document.querySelector('span.select2[style*="550px"] .select2-selection') ||
+          document.querySelector('.select2-selection[aria-labelledby="select2-ref_kua-container"]');
+
+        if (typeof jQuery !== 'undefined') {
+          try { jQuery(select).select2('open'); } catch (_) {}
+        }
+        clickLikeUser(container?.closest('.select2-selection') || container);
+        await delay(250);
+
+        const input = findKuaSearchInput();
+        if (!input) continue;
+        dispatchTyping(input, term);
+        await delay(1400);
+
+        const resultEl = findKuaResult(wanted, term);
+        if (resultEl) {
+          clickLikeUser(resultEl);
+          await delay(350);
+
+          const selectedText = document.getElementById('select2-ref_kua-container')?.textContent || '';
+          if (selectedText && (kuaMatches(selectedText, wanted) || kuaMatches(selectedText, term))) return true;
+
+          const refreshed = Array.from(select.options || []).find(o => o.selected || kuaMatches(o.textContent || o.text, wanted));
+          if (refreshed && selectOption(select, refreshed)) return true;
+        }
+      } catch (_) {}
     }
 
-    result.errors.push(`KUA Tempat Menikah: tidak ditemukan/terpilih (${wanted}). Coba buka dropdown KUA manual sekali, lalu klik Fill lagi.`);
+    result.errors.push(`KUA Tempat Menikah: dropdown muncul manual, tapi script belum berhasil memilih (${wanted}). Coba klik field KUA sekali lalu klik Fill lagi.`);
     return false;
   }
 
