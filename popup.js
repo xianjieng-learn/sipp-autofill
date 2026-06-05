@@ -795,11 +795,14 @@ async function fillSippMainWorld(data) {
       // whose text contains the city part (after comma) from the full term.
       // Try Select2 AJAX config first, fallback to hardcoded endpoint
       let ajaxUrl = '/SIPP/kua/cari';
-      let ajaxType = 'post';
+      let ajaxType = 'get';
+      let select2DataFn = null;
       try {
         const $kuaSel = jQuery('#ref_kua');
         const ajaxConfig = $kuaSel.data('select2')?.options?.options?.ajax;
-        if (ajaxConfig?.url) { ajaxUrl = ajaxConfig.url; ajaxType = ajaxConfig.type || 'post'; }
+        if (ajaxConfig?.url) { ajaxUrl = ajaxConfig.url; }
+        if (ajaxConfig?.type) { ajaxType = ajaxConfig.type; }
+        if (typeof ajaxConfig?.data === 'function') { select2DataFn = ajaxConfig.data; }
       } catch(_) {}
 
       const fullTerm = mi.kua_dicatat;
@@ -807,15 +810,29 @@ async function fillSippMainWorld(data) {
       const cityPart = fullTerm.includes(',') ? fullTerm.split(',').slice(1).join(',').trim() : '';
       const url = ajaxUrl || '/SIPP/kua/cari';
 
-      console.log('[SIPP KUA] AJAX strategy — full:', fullTerm, '| short:', shortTerm, '| city:', cityPart);
+      // Helper: send AJAX using Select2's data function if available,
+      // otherwise build payload manually ({q: term} for GET, {term: term} for POST)
+      function kuaSearch(term) {
+        return new Promise((resolve) => {
+          let ajaxData;
+          if (select2DataFn) {
+            // Use Select2's own data mapper — it knows the right param name
+            try { ajaxData = select2DataFn({ term }); } catch(_) { ajaxData = { q: term }; }
+          } else {
+            ajaxData = ajaxType.toLowerCase() === 'get' ? { q: term } : { term };
+          }
+          jQuery.ajax({
+            url, type: ajaxType, dataType: 'json', data: ajaxData,
+            success: (r) => { console.log('[SIPP KUA] response for "' + term + '":', r); resolve(Array.isArray(r) ? r : []); },
+            error: (e) => { console.warn('[SIPP KUA] ajax error for "' + term + '":', e.status, e.statusText); resolve([]); },
+          });
+        });
+      }
+
+      console.log('[SIPP KUA] AJAX strategy — full:', fullTerm, '| short:', shortTerm, '| city:', cityPart, '| url:', url, '| type:', ajaxType);
 
       // Step 1: try full term
-      let response = await new Promise((resolve) => {
-        jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: fullTerm },
-          success: (r) => { console.log('[SIPP KUA] full response:', r); resolve(Array.isArray(r) ? r : []); },
-          error: () => resolve([]),
-        });
-      });
+      let response = await kuaSearch(fullTerm);
 
       let match = response.find((item) => {
         const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
@@ -825,12 +842,7 @@ async function fillSippMainWorld(data) {
 
       // Step 2: if no match, try short term
       if (!match && shortTerm !== fullTerm) {
-        response = await new Promise((resolve) => {
-          jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: shortTerm },
-            success: (r) => { console.log('[SIPP KUA] short response:', r); resolve(Array.isArray(r) ? r : []); },
-            error: () => resolve([]),
-          });
-        });
+        response = await kuaSearch(shortTerm);
         const v = shortTerm.toLowerCase().replace(/\s+/g, '');
         const candidates = response.filter((item) => {
           const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
@@ -852,12 +864,7 @@ async function fillSippMainWorld(data) {
       if (!match) {
         const noSpace = shortTerm.replace(/\s+/g, '');
         if (noSpace !== shortTerm && noSpace.length > 3) {
-          response = await new Promise((resolve) => {
-            jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: noSpace },
-              success: (r) => { console.log('[SIPP KUA] noSpace response:', r); resolve(Array.isArray(r) ? r : []); },
-              error: () => resolve([]),
-            });
-          });
+          response = await kuaSearch(noSpace);
           const v = noSpace.toLowerCase();
           const candidates = response.filter((item) => {
             const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
@@ -877,12 +884,7 @@ async function fillSippMainWorld(data) {
       // Step 3: if still no match, try first word only (last resort)
       if (!match && shortTerm.split(/\s+/).length > 1) {
         const firstWord = shortTerm.split(/\s+/)[0];
-        response = await new Promise((resolve) => {
-          jQuery.ajax({ url, type: ajaxType, dataType: 'json', data: { term: firstWord },
-            success: (r) => { console.log('[SIPP KUA] firstWord response:', r); resolve(Array.isArray(r) ? r : []); },
-            error: () => resolve([]),
-          });
-        });
+        response = await kuaSearch(firstWord);
         const v = firstWord.toLowerCase();
         match = response.find((item) => {
           const t = String(item.text || '').toLowerCase();
