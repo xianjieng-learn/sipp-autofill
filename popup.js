@@ -630,11 +630,19 @@ async function fillSippMainWorld(data) {
         await delay(250);
 
         const input = findKuaSearchInput();
-        if (!input) continue;
+        if (!input) {
+          console.warn('[SIPP KUA] search input not found for term:', term);
+          continue;
+        }
         dispatchTyping(input, term);
-        await delay(1400);
 
-        const resultEl = findKuaResult(wanted, term);
+        // Poll for results instead of fixed delay — wait up to 3s for AJAX to return
+        let resultEl = null;
+        for (let i = 0; i < 12; i++) {
+          await delay(250);
+          resultEl = findKuaResult(wanted, term);
+          if (resultEl) break;
+        }
         if (resultEl) {
           clickLikeUser(resultEl);
           await delay(350);
