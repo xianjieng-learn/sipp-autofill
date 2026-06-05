@@ -1,7 +1,4 @@
-/**
- * SIPP AutoFill - Popup Script
- * Handles SIPP form filling from PTSP Helper data.
- */
+/* SIPP AutoFill - Popup Script */
 
 const jsonInput = document.getElementById('jsonInput');
 const btnPaste = document.getElementById('btnPaste');
@@ -14,127 +11,157 @@ const childrenList = document.getElementById('childrenList');
 let parsedData = null;
 let selectedChild = null;
 
-// ─── Status helpers ───
 function showStatus(msg, type = 'info') {
   statusEl.textContent = msg;
   statusEl.className = `status show ${type}`;
 }
 
-function hideStatus() {
-  statusEl.className = 'status';
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+  }
+  return '';
 }
 
-// ─── Parse JSON ───
-function parseJSON() {
-  const raw = jsonInput.value.trim();
-  if (!raw) {
-    showStatus('⚠️ Belum ada data. Paste JSON dari PTSP Helper dulu.', 'error');
-    return;
+function getNested(obj, path) {
+  return path.split('.').reduce((acc, key) => (acc && Object.prototype.hasOwnProperty.call(acc, key) ? acc[key] : undefined), obj);
+}
+
+function pickValue(data, aliases) {
+  return firstNonEmpty(...aliases.map(key => key.includes('.') ? getNested(data, key) : data?.[key]));
+}
+
+function normalizeDate(value) {
+  const raw = firstNonEmpty(value);
+  if (!raw) return '';
+
+  let m = raw.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = `20${y}`;
+    return `${d.padStart(2, '0')}/${mo.padStart(2, '0')}/${y}`;
   }
 
+  m = raw.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (m) {
+    const [, y, mo, d] = m;
+    return `${d.padStart(2, '0')}/${mo.padStart(2, '0')}/${y}`;
+  }
+
+  const months = {
+    januari: '01', jan: '01', februari: '02', feb: '02', maret: '03', mar: '03',
+    april: '04', apr: '04', mei: '05', juni: '06', jun: '06', juli: '07', jul: '07',
+    agustus: '08', agu: '08', agt: '08', aug: '08', september: '09', sep: '09', sept: '09',
+    oktober: '10', okt: '10', oct: '10', november: '11', nov: '11', desember: '12', des: '12', dec: '12',
+  };
+
+  const cleaned = raw
+    .replace(/^(senin|selasa|rabu|kamis|jumat|jum'at|sabtu|minggu),?\s+/i, '')
+    .replace(/\./g, '')
+    .trim();
+
+  m = cleaned.match(/\b(\d{1,2})\s+([A-Za-zÀ-ÿ']+)\s+(\d{2,4})\b/);
+  if (m) {
+    let [, d, monthName, y] = m;
+    const mo = months[monthName.toLowerCase()];
+    if (mo) {
+      if (y.length === 2) y = `20${y}`;
+      return `${d.padStart(2, '0')}/${mo}/${y}`;
+    }
+  }
+
+  return raw;
+}
+
+function normalizeData(data) {
+  const childSource = [data.children, data.anak, data.data_anak, data.child_data].find(Array.isArray) || [];
+  const marriageSource = data.marriage_info && typeof data.marriage_info === 'object' ? data.marriage_info : {};
+
+  const tanggalMenikah = firstNonEmpty(
+    marriageSource.tanggal_menikah, marriageSource.tgl_nikah, marriageSource.tanggal_nikah,
+    data.tanggal_menikah, data.tgl_nikah, data.tanggal_nikah
+  );
+
+  const tanggalDicatat = firstNonEmpty(
+    marriageSource.tanggal_dicatat, marriageSource.tanggal_kutipan_akta_nikah, marriageSource.tgl_kutipan_akta_nikah,
+    marriageSource.tanggal_akta_nikah, data.tanggal_dicatat, data.tanggal_kutipan_akta_nikah,
+    data.tgl_kutipan_akta_nikah, data.tanggal_akta_nikah
+  );
+
+  const nomorAkta = firstNonEmpty(
+    marriageSource.nomor_akta_nikah, marriageSource.nomor_kutipan_akta_nikah, marriageSource.no_kutipan_akta_nikah,
+    marriageSource.no_akta_nikah, data.nomor_akta_nikah, data.nomor_kutipan_akta_nikah,
+    data.no_kutipan_akta_nikah, data.no_akta_nikah
+  );
+
+  const kuaDicatat = firstNonEmpty(
+    marriageSource.kua_dicatat, marriageSource.kua_tempat_menikah, marriageSource.kua_tempat_nikah,
+    marriageSource.kua_menikah, marriageSource.kua, marriageSource.tempat_menikah,
+    data.kua_dicatat, data.kua_tempat_menikah, data.kua_tempat_nikah, data.kua_menikah,
+    data.kua, data.tempat_menikah
+  );
+
+  return {
+    children: childSource.map(normalizeChild),
+    posita: pickValue(data, ['posita', 'dalil', 'alasan']),
+    petitum: pickValue(data, ['petitum', 'tuntutan', 'amar']),
+    obyek_sengketa: pickValue(data, ['obyek_sengketa', 'objek_sengketa', 'obyek_gugatan', 'objek_gugatan']) || '-',
+    tanggal_surat: normalizeDate(pickValue(data, [
+      'tanggal_surat', 'tgl_surat', 'tanggalSurat', 'tglSurat', 'surat_tanggal',
+      'tanggal_permohonan', 'tanggal_gugatan', 'tgl_permohonan', 'tgl_gugatan',
+      'data_umum.tanggal_surat', 'data_umum.tgl_surat', 'surat.tanggal', 'surat.tgl_surat',
+    ])),
+    marriage_info: {
+      tanggal_menikah: normalizeDate(tanggalMenikah),
+      tanggal_dicatat: normalizeDate(tanggalDicatat),
+      nomor_akta_nikah: nomorAkta,
+      kua_dicatat: kuaDicatat,
+    },
+  };
+}
+
+function normalizeChild(c) {
+  c = c || {};
+  let tempat = firstNonEmpty(c.tempat_lahir, c.tempatLahir, c.tmp_lahir, c.tempat);
+  let tanggal = firstNonEmpty(c.tanggal_lahir, c.tanggalLahir, c.tgl_lahir, c.tanggal);
+
+  if (!/\d/.test(tanggal) && /\d/.test(tempat)) [tempat, tanggal] = [tanggal, tempat];
+
+  return {
+    anak_ke: firstNonEmpty(c.anak_ke, c.anakKe, c.index, c.urutan) || null,
+    nama: firstNonEmpty(c.nama, c.name, c.nama_anak, c.nama_lengkap),
+    nik: firstNonEmpty(c.nik, c.NIK),
+    tempat_lahir: tempat,
+    tanggal_lahir: normalizeDate(tanggal),
+    jenis_kelamin: firstNonEmpty(c.jenis_kelamin, c.jenisKelamin, c.jk, c.kelamin),
+    pendidikan: firstNonEmpty(c.pendidikan, c.jenis_pendidikan),
+    pengasuhan: firstNonEmpty(c.pengasuhan, c.diasuh_oleh, c.diasuhOleh, c.diasuh, c.hadhanah),
+  };
+}
+
+function parseJSON() {
+  const raw = jsonInput.value.trim();
+  if (!raw) return showStatus('⚠️ Belum ada data. Paste JSON dari PTSP Helper dulu.', 'error');
+
   try {
-    const data = JSON.parse(raw);
-    parsedData = normalizeData(data);
-    
-    // Show preview
+    parsedData = normalizeData(JSON.parse(raw));
     renderPreview(parsedData);
     btnFillAll.disabled = false;
-    
-    // Show children list if multiple children
-    if (parsedData.children && parsedData.children.length > 0) {
+
+    if (parsedData.children.length) {
       showStatus(`✅ Terdeteksi ${parsedData.children.length} anak. Siap di-fill.`, 'success');
       renderChildren(parsedData.children);
     } else {
-      showStatus(`✅ Data siap di-fill ke SIPP.`, 'success');
+      showStatus('✅ Data siap di-fill ke SIPP.', 'success');
+      childrenList.innerHTML = '';
+      childrenList.style.display = 'none';
+      selectedChild = null;
     }
   } catch (e) {
     showStatus(`❌ JSON tidak valid: ${e.message}`, 'error');
   }
 }
 
-// ─── Normalize data from PTSP Helper ───
-function normalizeData(data) {
-  const result = {
-    children: [],
-    posita: '',
-    petitum: '',
-    obyek_sengketa: '-',
-    marriage_info: {},
-    tanggal_surat: '',
-  };
-
-  // Handle children array
-  if (data.children && Array.isArray(data.children)) {
-    result.children = data.children.map(normalizeChild);
-  }
-
-  // Handle posita
-  if (data.posita) {
-    result.posita = data.posita;
-  }
-
-  // Handle petitum
-  if (data.petitum) {
-    result.petitum = data.petitum;
-  }
-
-  // Handle obyek sengketa
-  if (data.obyek_sengketa) {
-    result.obyek_sengketa = data.obyek_sengketa;
-  }
-
-  // Handle tanggal surat
-  if (data.tanggal_surat) {
-    result.tanggal_surat = data.tanggal_surat;
-  }
-
-  // Handle marriage info — nested object from PTSP Helper
-  if (data.marriage_info && typeof data.marriage_info === 'object') {
-    result.marriage_info = {
-      tanggal_menikah: data.marriage_info.tanggal_menikah || '',
-      tanggal_dicatat: data.marriage_info.tanggal_dicatat || '',
-      nomor_akta_nikah: data.marriage_info.nomor_akta_nikah || '',
-      kua_dicatat: data.marriage_info.kua_dicatat || '',
-    };
-  } else if (data.tanggal_menikah || data.tanggal_dicatat || data.nomor_akta_nikah || data.kua_dicatat) {
-    // Fallback: top-level fields (old format)
-    result.marriage_info = {
-      tanggal_menikah: data.tanggal_menikah || '',
-      tanggal_dicatat: data.tanggal_dicatat || '',
-      nomor_akta_nikah: data.nomor_akta_nikah || '',
-      kua_dicatat: data.kua_dicatat || '',
-    };
-  }
-
-  return result;
-}
-
-function normalizeChild(c) {
-  // Sanitize tempat_lahir / tanggal_lahir — sometimes extraction swaps them
-  let tempat = c.tempat_lahir || c.tempatLahir || '';
-  let tanggal = c.tanggal_lahir || c.tanggalLahir || '';
-
-  // If tanggal looks like a city name (no digits) and tempat looks like a date, swap
-  const tanggalIsDate = /\d/.test(tanggal);
-  const tempatIsDate = /\d/.test(tempat);
-  if (!tanggalIsDate && tempatIsDate) {
-    [tempat, tanggal] = [tanggal, tempat];
-  }
-
-  return {
-    anak_ke: c.anak_ke || c.index || null,
-    nama: c.nama || c.name || '',
-    nik: c.nik || '',
-    tempat_lahir: tempat,
-    tanggal_lahir: tanggal,
-    jenis_kelamin: c.jenis_kelamin || c.jk || '',
-    pendidikan: c.pendidikan || '',
-    pengasuhan: c.pengasuhan || '',
-    _raw: c,
-  };
-}
-
-// ─── Render children list ───
 function renderChildren(children) {
   childrenList.innerHTML = '';
   childrenList.style.display = 'block';
@@ -142,10 +169,7 @@ function renderChildren(children) {
   children.forEach((c, i) => {
     const btn = document.createElement('button');
     btn.className = 'child-btn';
-    btn.innerHTML = `
-      <span class="child-name">${c.nama || 'Anak ' + (i + 1)}</span>
-      <span class="child-badge">Anak ke-${c.anak_ke || i + 1}</span>
-    `;
+    btn.innerHTML = `<span class="child-name">${c.nama || `Anak ${i + 1}`}</span><span class="child-badge">Anak ke-${c.anak_ke || i + 1}</span>`;
     btn.onclick = () => {
       selectedChild = c;
       document.querySelectorAll('.child-btn').forEach(b => b.classList.remove('selected'));
@@ -154,120 +178,44 @@ function renderChildren(children) {
     childrenList.appendChild(btn);
   });
 
-  // Auto-select first child
-  if (children.length > 0) {
-    selectedChild = children[0];
-    childrenList.children[0].classList.add('selected');
-  }
+  selectedChild = children[0] || null;
+  if (childrenList.children[0]) childrenList.children[0].classList.add('selected');
 }
 
-// ─── Render preview ───
 function renderPreview(data) {
-  let html = `
-    <div class="preview-header">
-      <span>📋 Preview Data SIPP</span>
-    </div>
-  `;
+  let html = '<div class="preview-header"><span>📋 Preview Data SIPP</span></div>';
 
-  // Children section
-  if (data.children && data.children.length > 0) {
-    html += `
-      <div class="preview-section">
-        <div class="preview-section-title">👶 Data Anak (${data.children.length})</div>
-    `;
-    
+  if (data.children.length) {
+    html += `<div class="preview-section"><div class="preview-section-title">👶 Data Anak (${data.children.length})</div>`;
     data.children.forEach((c, i) => {
-      html += `
-        <div class="preview-field">
-          <span class="preview-label">Anak ${i + 1}</span>
-          <span class="preview-value">${c.nama || 'Tanpa Nama'}</span>
-        </div>
-      `;
-      if (c.tempat_lahir && c.tanggal_lahir) {
-        html += `
-          <div class="preview-field">
-            <span class="preview-label">Lahir</span>
-            <span class="preview-value">${c.tempat_lahir}, ${c.tanggal_lahir}</span>
-          </div>
-        `;
-      }
-      if (c.nik) {
-        html += `
-          <div class="preview-field">
-            <span class="preview-label">NIK</span>
-            <span class="preview-value">${c.nik}</span>
-          </div>
-        `;
-      }
+      html += `<div class="preview-field"><span class="preview-label">Anak ${i + 1}</span><span class="preview-value">${c.nama || 'Tanpa Nama'}</span></div>`;
     });
-    
-    html += `</div>`;
+    html += '</div>';
   }
 
-  // Posita section
-  if (data.posita) {
-    html += `
-      <div class="preview-section">
-        <div class="preview-section-title">📝 Posita</div>
-        <div class="preview-field">
-          <span class="preview-label">Panjang</span>
-          <span class="preview-value">${data.posita.length} karakter</span>
-        </div>
-      </div>
-    `;
-  }
+  if (data.posita) html += `<div class="preview-section"><div class="preview-section-title">📝 Posita</div><div class="preview-field"><span class="preview-label">Panjang</span><span class="preview-value">${data.posita.length} karakter</span></div></div>`;
+  if (data.petitum) html += `<div class="preview-section"><div class="preview-section-title">📋 Petitum</div><div class="preview-field"><span class="preview-label">Panjang</span><span class="preview-value">${data.petitum.length} karakter</span></div></div>`;
 
-  // Petitum section
-  if (data.petitum) {
-    html += `
-      <div class="preview-section">
-        <div class="preview-section-title">📋 Petitum</div>
-        <div class="preview-field">
-          <span class="preview-label">Panjang</span>
-          <span class="preview-value">${data.petitum.length} karakter</span>
-        </div>
-      </div>
-    `;
-  }
-
-  // Marriage info section
-  if (data.marriage_info && Object.values(data.marriage_info).some(v => v)) {
-    html += `
-      <div class="preview-section">
-        <div class="preview-section-title">💍 Info Pernikahan</div>
-    `;
-    
-    const fields = [
-      ['Tanggal Menikah', data.marriage_info.tanggal_menikah],
-      ['Tanggal Dicatat', data.marriage_info.tanggal_dicatat],
-      ['No. Akta Nikah', data.marriage_info.nomor_akta_nikah],
-      ['KUA Dicatat', data.marriage_info.kua_dicatat],
-    ];
-    
-    fields.forEach(([label, value]) => {
-      if (value) {
-        html += `
-          <div class="preview-field">
-            <span class="preview-label">${label}</span>
-            <span class="preview-value" title="${value}">${value}</span>
-          </div>
-        `;
-      }
+  const mi = data.marriage_info || {};
+  if (Object.values(mi).some(Boolean)) {
+    html += '<div class="preview-section"><div class="preview-section-title">💍 Info Pernikahan</div>';
+    [
+      ['Tanggal Menikah', mi.tanggal_menikah],
+      ['Tanggal Dicatat', mi.tanggal_dicatat],
+      ['No. Akta Nikah', mi.nomor_akta_nikah],
+      ['KUA Tempat Menikah', mi.kua_dicatat],
+    ].forEach(([label, value]) => {
+      if (value) html += `<div class="preview-field"><span class="preview-label">${label}</span><span class="preview-value" title="${value}">${value}</span></div>`;
     });
-    
-    html += `</div>`;
+    html += '</div>';
   }
 
   previewEl.innerHTML = html;
   previewEl.className = 'preview show';
 }
 
-// ─── Fill all SIPP fields ───
 async function fillAllSipp() {
-  if (!parsedData) {
-    showStatus('⚠️ Parse data dulu sebelum fill.', 'error');
-    return;
-  }
+  if (!parsedData) return showStatus('⚠️ Parse data dulu sebelum fill.', 'error');
 
   btnFillAll.disabled = true;
   btnFillAll.textContent = '⏳ Filling...';
@@ -275,101 +223,56 @@ async function fillAllSipp() {
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    const sippHosts = ['ecourt.mahkamahagung.go.id', '25.24.23.7'];
-    const isSippPage = sippHosts.some(host => tab.url.includes(host));
-    if (!tab || !isSippPage) {
-      showStatus('❌ Buka halaman SIPP di eCourt dulu!', 'error');
-      btnFillAll.disabled = false;
-      btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
-      return;
-    }
+    const isSippPage = tab && ['ecourt.mahkamahagung.go.id', '25.24.23.7'].some(host => tab.url.includes(host));
+    if (!isSippPage) return showStatus('❌ Buka halaman SIPP/eCourt dulu.', 'error');
 
-    // Always inject into MAIN world for fill — content script (isolated world) can't access CKEDITOR
-    showStatus('⏳ Mengisi form SIPP...', 'info');
-    try {
-      // Data Anak lives in a separate SIPP popup that can save only ONE child at a time.
-      // If a child card is selected in the extension, send only that child so we don't
-      // loop through all children and overwrite the same Data Anak form.
-      const dataForFill = selectedChild
-        ? { ...parsedData, children: [selectedChild] }
-        : parsedData;
+    const dataForFill = selectedChild ? { ...parsedData, children: [selectedChild] } : parsedData;
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: fillSippMainWorld,
+      args: [dataForFill],
+    });
 
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',
-        func: fillSippMainWorld,
-        args: [dataForFill],
-      });
-      const response = results?.[0]?.result || { success: false, error: 'No result from injection' };
-      renderFillResult(response);
-    } catch (injectErr) {
-      console.error('[SIPP Extension] executeScript failed:', injectErr);
-      showStatus(`❌ Gagal inject: ${injectErr.message}. Coba refresh halaman SIPP.`, 'error');
-    }
+    renderFillResult(results?.[0]?.result || { success: false, errors: ['Tidak ada response dari halaman SIPP'] });
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
+  } finally {
+    btnFillAll.disabled = false;
+    btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
   }
-
-  btnFillAll.disabled = false;
-  btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
 }
 
-// ─── Render fill results with details ───
 function renderFillResult(response) {
-  if (!response) {
-    showStatus('❌ Tidak ada response dari halaman SIPP', 'error');
-    return;
-  }
+  document.getElementById('errorDetails')?.remove();
+  const filled = response?.filledFields || 0;
+  const errors = response?.errors || [];
 
-  const filledCount = response.filledFields || 0;
-  const errors = response.errors || [];
-  
-  if (filledCount > 0 && errors.length === 0) {
-    // All success
-    showStatus(`✅ Berhasil mengisi ${filledCount} field! Semua OK.`, 'success');
-  } else if (filledCount > 0 && errors.length > 0) {
-    // Partial success
-    showStatus(`⚠️ ${filledCount} field berhasil, ${errors.length} gagal. Lihat detail di bawah.`, 'info');
-    renderErrorDetails(errors);
-  } else if (errors.length > 0) {
-    // All failed
-    showStatus(`❌ Semua field gagal diisi. Lihat detail di bawah.`, 'error');
-    renderErrorDetails(errors);
-  } else {
-    showStatus(`⚠️ ${response?.error || 'Gagal mengisi form SIPP'}`, 'error');
+  if (filled && !errors.length) return showStatus(`✅ Berhasil mengisi ${filled} field.`, 'success');
+  if (filled && errors.length) {
+    showStatus(`⚠️ ${filled} field berhasil, ${errors.length} gagal.`, 'info');
+    return renderErrorDetails(errors);
   }
+  if (errors.length) {
+    showStatus('❌ Semua field gagal diisi. Lihat detail di bawah.', 'error');
+    return renderErrorDetails(errors);
+  }
+  showStatus('⚠️ Gagal mengisi form SIPP.', 'error');
 }
 
-// ─── Render error details ───
 function renderErrorDetails(errors) {
-  // Remove existing error details
-  const existing = document.getElementById('errorDetails');
-  if (existing) existing.remove();
-  
   const div = document.createElement('div');
   div.id = 'errorDetails';
-  div.style.cssText = 'margin-top: 8px; padding: 8px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; font-size: 10px; max-height: 150px; overflow-y: auto;';
-  
-  let html = '<div style="font-weight: 600; margin-bottom: 4px; color: #856404;">⚠️ Field yang gagal:</div>';
-  
-  errors.forEach(err => {
-    html += `<div style="padding: 2px 0; color: #856404; border-bottom: 1px solid #ffeeba;">• ${err}</div>`;
-  });
-  
-  html += '<div style="margin-top: 6px; font-size: 9px; color: #856404;">💡 Tips: Pastikan form SIPP sedang terbuka dan field ada di halaman.</div>';
-  
-  div.innerHTML = html;
-  
-  // Insert after status element
+  div.style.cssText = 'margin-top:8px;padding:8px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;font-size:10px;max-height:150px;overflow-y:auto;';
+  div.innerHTML = '<div style="font-weight:600;margin-bottom:4px;color:#856404;">⚠️ Field yang gagal:</div>' +
+    errors.map(err => `<div style="padding:2px 0;color:#856404;border-bottom:1px solid #ffeeba;">• ${err}</div>`).join('') +
+    '<div style="margin-top:6px;font-size:9px;color:#856404;">💡 Pastikan popup/form SIPP yang sesuai sedang terbuka.</div>';
   statusEl.parentNode.insertBefore(div, statusEl.nextSibling);
 }
 
-// ─── Event listeners ───
 btnPaste.addEventListener('click', async () => {
   try {
-    const text = await navigator.clipboard.readText();
-    jsonInput.value = text;
+    jsonInput.value = await navigator.clipboard.readText();
     showStatus('📋 Berhasil paste dari clipboard.', 'info');
     parseJSON();
   } catch (e) {
@@ -379,601 +282,452 @@ btnPaste.addEventListener('click', async () => {
 
 btnParse.addEventListener('click', parseJSON);
 btnFillAll.addEventListener('click', fillAllSipp);
+if (jsonInput.value.trim()) parseJSON();
 
-// Auto-parse if there's content
-if (jsonInput.value.trim()) {
-  parseJSON();
-}
-
-// ─── MAIN World Fill Function ───
-// This function is injected into the page's MAIN world via chrome.scripting.executeScript
-// so it can access CKEDITOR, jQuery, and other page-level variables.
 async function fillSippMainWorld(data) {
-  console.log('[SIPP MAIN] Function called. Data keys:', Object.keys(data));
-  console.log('[SIPP MAIN] marriage_info:', data.marriage_info);
-  console.log('[SIPP MAIN] tanggal_surat:', data.tanggal_surat);
   const result = { filledFields: 0, errors: [] };
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  // Helper: check if an element (or any ancestor) is hidden via display:none / visibility:hidden
-  function isNodeVisible(node) {
+  function isVisible(node) {
     if (!node) return false;
-    let el = node.nodeType === 1 ? node : node.parentElement;
-    if (!el) return false;
-    try {
-      let cur = el;
-      while (cur && cur !== document) {
-        const s = window.getComputedStyle(cur);
-        if (s.display === 'none' || s.visibility === 'hidden') return false;
-        cur = cur.parentElement;
-      }
-      return true;
-    } catch(e) { return true; }
+    let el = node;
+    while (el && el !== document) {
+      const s = window.getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden') return false;
+      el = el.parentElement;
+    }
+    return true;
   }
 
-  // Only treat the Data Anak form as "open" when its elements are actually visible.
-  // Previously this used a bare querySelector which matched even when the popup was
-  // closed but DOM nodes still existed — causing tanggal_surat/posita/petitum to be
-  // silently skipped on the main form.
-  const _daForm = document.querySelector('form[action*="addAnakPihak"]');
-  const _daAnakKe = document.querySelector('#frm_user #anak_ke');
-  const _daTglLahir = document.querySelector('#frm_user #tgl_lahir');
-  const isDataAnakForm = (_daForm && isNodeVisible(_daForm)) ||
-                          (_daAnakKe && isNodeVisible(_daAnakKe)) ||
-                          (_daTglLahir && isNodeVisible(_daTglLahir));
-  console.log('[SIPP MAIN] isDataAnakForm:', isDataAnakForm, '(form:', !!_daForm, 'visible:', _daForm ? isNodeVisible(_daForm) : 'n/a', ')');
-
-  // Convert plain text posita/petitum to HTML for CKEditor
-  function textToHtml(text) {
-    if (!text) return '';
-    // Already has HTML tags? Wrap each block in justify paragraph
-    if (/<[a-z][\s\S]*>/i.test(text)) {
-      // Add text-align:justify to existing <p> tags
-      return text.replace(/<p(\s[^>]*)?>/gi, '<p$1 style="text-align:justify">')
-                 .replace(/<li(\s[^>]*)?>/gi, '<li$1 style="text-align:justify">');
-    }
-    // Convert plain text with numbered list + sub-numbering to HTML
-    // Supports: 1. 2. (main) + a. b. c. or i. ii. iii. (sub) + 4.1 4.2 (sub)
-    const lines = text.split(/\r?\n/);
-    let html = '';
-    let inOl = false;
-    let inSubOl = false;
-    let liOpen = false; // track if main <li> is open (waiting for sub-items)
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        if (inSubOl) { html += '</ol>'; inSubOl = false; }
-        if (liOpen) { html += '</li>'; liOpen = false; }
-        if (inOl) { html += '</ol>'; inOl = false; }
-        html += '<p style="text-align:justify">&nbsp;</p>';
-        continue;
-      }
-      // Check sub-decimal FIRST (e.g. "4.1." "5.2.") to avoid false main-number match
-      const subDecimalMatch = trimmed.match(/^(\d+\.\d+)[.)]?\s*(.+)/);
-      // Sub-numbered item: "a." "b." "i." "ii."
-      const subAlphaMatch = trimmed.match(/^([a-z])[.)]\s*(.+)/i);
-      // Main numbered item: "1." "2." etc. — must NOT be followed by another digit+dot
-      const numMatch = trimmed.match(/^(\d+)[.)]\s*(.+)/);
-
-      if (subDecimalMatch && inOl) {
-        // Decimal sub-item: "3.1 description" — prefix included in text for correct numbering
-        if (!inSubOl) {
-          html += '<ol>';
-          inSubOl = true;
-        }
-        html += `<li style="text-align:justify">${subDecimalMatch[0]}</li>`;
-      } else if (subAlphaMatch && inOl) {
-        // Sub-item under a main item: open nested <ol> inside last <li>
-        if (!inSubOl) {
-          html += '<ol style="list-style-type:lower-alpha">';
-          inSubOl = true;
-        }
-        html += `<li style="text-align:justify">${subAlphaMatch[2]}</li>`;
-      } else if (numMatch) {
-        // Close previous sub-list and <li> if open
-        if (inSubOl) { html += '</ol>'; inSubOl = false; }
-        if (liOpen) { html += '</li>'; liOpen = false; }
-        if (!inOl) { html += '<ol>'; inOl = true; }
-        // Open new <li> but don't close yet (sub-items may follow)
-        html += `<li style="text-align:justify">${numMatch[2]}`;
-        liOpen = true;
-      } else {
-        // Close any open lists
-        if (inSubOl) { html += '</ol>'; inSubOl = false; }
-        if (liOpen) { html += '</li>'; liOpen = false; }
-        if (inOl) { html += '</ol>'; inOl = false; }
-        html += `<p style="text-align:justify">${trimmed}</p>`;
-      }
-    }
-    // Close any remaining open lists
-    if (inSubOl) html += '</ol>';
-    if (liOpen) html += '</li>';
-    if (inOl) html += '</ol>';
-    return html;
-  }
+  const isDataAnakForm = isVisible(document.querySelector('form[action*="addAnakPihak"], #frm_user'));
 
   function setVal(el, value) {
-    if (!el) return false;
-    // Set value directly on DOM element
-    el.value = value;
-    // Also try native setter for React/framework compatibility
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-    if (setter && setter !== Object.getOwnPropertyDescriptor(el.__proto__, 'value')?.set) {
-      try { setter.call(el, value); } catch(e) {}
-    }
-    // Trigger jQuery datepicker if present
+    if (!el || value === undefined || value === null || String(value).trim() === '') return false;
+    const val = String(value);
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    try { setter ? setter.call(el, val) : (el.value = val); } catch (_) { el.value = val; }
+
     if (typeof jQuery !== 'undefined') {
       try {
         const $el = jQuery(el);
         if ($el.hasClass('hasDatepicker') || $el.data('datepicker')) {
-          // Parse DD/MM/YYYY (or DD/MM/YY) into a Date object so setDate works
-          // regardless of the datepicker's dateFormat setting.
-          const parts = String(value).split('/');
-          if (parts.length === 3) {
-            let [d, m, y] = parts;
-            if (y.length === 2) y = '20' + y;
-            const dt = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-            if (!isNaN(dt.getTime())) {
-              $el.datepicker('setDate', dt);
-            } else {
-              $el.datepicker('setDate', value); // fallback: raw string
-            }
-          } else {
-            $el.datepicker('setDate', value); // fallback
+          const [d, m, yRaw] = val.split('/');
+          if (d && m && yRaw) {
+            const y = yRaw.length === 2 ? `20${yRaw}` : yRaw;
+            const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+            if (!Number.isNaN(date.getTime())) $el.datepicker('setDate', date);
           }
         }
-        $el.val(value).trigger('input').trigger('change');
-      } catch(e) { console.warn('[SIPP setVal] datepicker error:', e.message); }
+        $el.val(val).trigger('input').trigger('change').trigger('blur');
+      } catch (_) {}
     }
+
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;
   }
 
-  function setSelect(sel, value) {
-    if (!sel || value === undefined || value === null || value === '') return false;
-    const normalize = (s) => String(s || '')
-      .toLowerCase()
-      .replace(/[._-]+/g, ' ')
+  function norm(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[._/()–—-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function compact(s) {
+    return norm(s).replace(/\s+/g, '');
+  }
+
+  function cleanKua(s) {
+    return norm(s)
+      .replace(/\bkantor urusan agama\b/g, ' ')
+      .replace(/\bkua\b/g, ' ')
+      .replace(/\bkecamatan\b/g, ' ')
+      .replace(/\bkec\b/g, ' ')
+      .replace(/\badm\b/g, ' ')
+      .replace(/\badministrasi\b/g, ' ')
+      .replace(/\bkota\b/g, ' ')
+      .replace(/\bkabupaten\b/g, ' ')
+      .replace(/\bkab\b/g, ' ')
+      .replace(/\bprovinsi\b/g, ' ')
+      .replace(/\bpropinsi\b/g, ' ')
+      .replace(/\bdaerah khusus ibukota\b/g, ' ')
+      .replace(/\bdki\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const compact = (s) => normalize(s).replace(/\s+/g, '');
-    const v = normalize(value);
-    const fieldKey = normalize(`${sel.id || ''} ${sel.name || ''}`);
-    const isDiasuh = fieldKey.includes('diasuh');
-    const isJenisKelamin = fieldKey.includes('jenis kelamin') || fieldKey.includes('jeniskelamin');
+  }
 
-    // Shorthand mapping for common SIPP/PTSP Helper values.
-    // Map to the exact-ish option text, then match by option text.
-    const shorthandMap = {
-      // pendidikan
-      'sd': 'sekolah dasar',
-      's d': 'sekolah dasar',
-      'smp': 'sekolah lanjutan tingkat pertama',
-      'sltp': 'sekolah lanjutan tingkat pertama',
-      'mts': 'sekolah lanjutan tingkat pertama',
-      'sma': 'sekolah lanjutan tingkat atas',
-      'smk': 'sekolah lanjutan tingkat atas',
-      'ma': 'sekolah lanjutan tingkat atas',
-      'slta': 'sekolah lanjutan tingkat atas',
-      's1': 'strata i',
-      'strata 1': 'strata i',
-      's2': 'strata ii',
-      'strata 2': 'strata ii',
-      's3': 'strata iii',
-      'strata 3': 'strata iii',
-      'd1': 'diploma i',
-      'd2': 'diploma ii',
-      'd3': 'diploma iii',
-      'd4': 'diploma iv',
-      'tk': 'taman kanak-kanak',
-      'paud': 'taman kanak-kanak',
-      'tidak ada': 'tidak ada',
-      'tidak sekolah': 'tidak ada',
-      'belum sekolah': 'tidak ada',
-      'belum tamat': 'tidak ada',
-      // diasuh oleh
-      'penggugat': 'penggugat/pemohon',
-      'pemohon': 'penggugat/pemohon',
-      'tergugat': 'tergugat/termohon',
-      'termohon': 'tergugat/termohon',
-      'orang tua': 'orang tua p atau t',
-      'orang tua p/t': 'orang tua p atau t',
-      'orang tua p atau t': 'orang tua p atau t',
-      'lain lain': 'lain-lain',
-      'lainnya': 'lain-lain',
-      // jenis kelamin
-      'laki laki': 'laki-laki',
-      'laki-laki': 'laki-laki',
-      'perempuan': 'perempuan',
-    };
-    if (isDiasuh) {
-      if (v === 'p') shorthandMap[v] = 'penggugat/pemohon';
-      if (v === 't') shorthandMap[v] = 'tergugat/termohon';
-    }
-    if (isJenisKelamin) {
-      if (v === 'l' || v === 'lk') shorthandMap[v] = 'laki-laki';
-      if (v === 'p' || v === 'pr') shorthandMap[v] = 'perempuan';
-    }
-    const expanded = shorthandMap[v] || v;
+  function tokenSubset(small, big) {
+    const smallTokens = cleanKua(small).split(/\s+/).filter(t => t.length > 2);
+    const bigTokens = cleanKua(big).split(/\s+/).filter(t => t.length > 2);
+    return smallTokens.length > 0 && smallTokens.every(t => bigTokens.includes(t));
+  }
 
-    const options = Array.from(sel.options || []);
-    let opt = options.find(o => String(o.value) === String(value));
+  function kuaMatches(optionText, wantedText) {
+    const optionNorm = norm(optionText);
+    const wantedNorm = norm(wantedText);
+    const optionClean = cleanKua(optionText);
+    const wantedClean = cleanKua(wantedText);
+    if (!optionNorm || !wantedNorm) return false;
+    return optionNorm === wantedNorm || optionNorm.includes(wantedNorm) || wantedNorm.includes(optionNorm) ||
+      compact(optionNorm).includes(compact(wantedNorm)) || compact(wantedNorm).includes(compact(optionNorm)) ||
+      optionClean === wantedClean || optionClean.includes(wantedClean) || wantedClean.includes(optionClean) ||
+      compact(optionClean).includes(compact(wantedClean)) || compact(wantedClean).includes(compact(optionClean)) ||
+      tokenSubset(wantedText, optionText) || tokenSubset(optionText, wantedText);
+  }
 
-    // Text match against expanded value first.
-    if (!opt) {
-      opt = options.find(o => {
-        const t = normalize(o.text);
-        return t === expanded || t.includes(expanded) || expanded.includes(t);
-      });
+  function selectOption(select, option, displayText) {
+    if (!select || !option) return false;
+    const options = Array.from(select.options || []);
+    options.forEach(o => { o.selected = false; });
+    option.selected = true;
+    select.selectedIndex = options.indexOf(option);
+    select.value = option.value;
+
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(select).val(option.value).trigger('change').trigger('input').trigger('blur'); } catch (_) {}
     }
 
-    // Text match against original value.
-    if (!opt) {
-      opt = options.find(o => {
-        const t = normalize(o.text);
-        return t === v || t.includes(v) || v.includes(t);
-      });
-    }
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // Compact fallback: "Laki laki" vs "Laki-laki", "Kedung Tuban" vs "Kedungtuban".
-    if (!opt) {
-      const wantCompact = compact(expanded);
-      const rawCompact = compact(value);
-      opt = options.find(o => {
-        const tCompact = compact(o.text);
-        return tCompact === wantCompact || tCompact.includes(wantCompact) || wantCompact.includes(tCompact)
-          || tCompact === rawCompact || tCompact.includes(rawCompact) || rawCompact.includes(tCompact);
-      });
-    }
-
-    if (!opt) return false;
-    if (typeof jQuery !== 'undefined' && jQuery(sel).data('select2')) {
-      jQuery(sel).val(opt.value).trigger('change').trigger('select2:select');
-    } else {
-      sel.value = opt.value;
-      sel.dispatchEvent(new Event('input', { bubbles: true }));
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    const text = displayText || option.textContent || option.text || '';
+    const container = document.getElementById(`select2-${select.id}-container`);
+    if (container) {
+      container.textContent = text;
+      container.setAttribute('title', text);
     }
     return true;
   }
 
-  // Fill Posita (CKEditor) — skip while the separate Data Anak popup is open.
-  if (!isDataAnakForm && data.posita) {
-    let filled = false;
-    // Try up to 3 times with delay (CKEditor might not be initialized yet)
-    for (let attempt = 0; attempt < 3 && !filled; attempt++) {
-      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['posita']) {
-        try {
-          const html = textToHtml(data.posita);
-          CKEDITOR.instances['posita'].setData(html);
-          // Force justify + sub-list style via injected <style> + DOM
-          try {
-            const body = CKEDITOR.instances['posita'].editable();
-            if (body) {
-              const $ = body.$;
-              // Inject persistent <style> tag into CKEditor document
-              const existingStyle = $.getElementById('hermes-justify-css');
-              if (!existingStyle) {
-                const styleEl = $.createElement('style');
-                styleEl.setId('hermes-justify-css');
-                styleEl.$.textContent = 'p,li{text-align:justify!important}ol ol{list-style-type:lower-alpha!important}';
-                $.getHead().append(styleEl);
-              }
-              // Also force via DOM for immediate effect
-              $.querySelectorAll('p,li').forEach(el => {
-                el.style.textAlign = 'justify';
-              });
-              $.querySelectorAll('ol ol').forEach(ol => {
-                ol.style.listStyleType = 'lower-alpha';
-              });
-            }
-          } catch(je) {}
-          const ta = document.getElementById('posita');
-          if (ta) ta.value = html;
-          result.filledFields++;
-          filled = true;
-        } catch(e) { result.errors.push('Posita: ' + e.message); filled = true; }
-      } else {
-        // Wait 300ms for CKEditor to initialize
-        await new Promise(r => setTimeout(r, 300));
-      }
-    }
-    if (!filled) result.errors.push('Posita: CKEditor tidak ditemukan');
-  }
+  function setSelect(select, value) {
+    if (!select || !value) return false;
+    const raw = String(value).trim();
+    const valueNorm = norm(raw);
+    const fieldKey = norm(`${select.id || ''} ${select.name || ''}`);
+    const isDiasuh = fieldKey.includes('diasuh');
+    const isJenisKelamin = fieldKey.includes('jenis kelamin') || fieldKey.includes('jeniskelamin');
+    const isPendidikan = fieldKey.includes('pendidikan');
 
-  // Fill Petitum (CKEditor) — skip while the separate Data Anak popup is open.
-  if (!isDataAnakForm && data.petitum) {
-    let filled = false;
-    for (let attempt = 0; attempt < 3 && !filled; attempt++) {
-      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances && CKEDITOR.instances['petitum']) {
-        try {
-          const html = textToHtml(data.petitum);
-          CKEDITOR.instances['petitum'].setData(html);
-          // Force justify + sub-list style via injected <style> + DOM
-          try {
-            const body = CKEDITOR.instances['petitum'].editable();
-            if (body) {
-              const $ = body.$;
-              // Inject persistent <style> tag into CKEditor document
-              const existingStyle = $.getElementById('hermes-justify-css');
-              if (!existingStyle) {
-                const styleEl = $.createElement('style');
-                styleEl.setId('hermes-justify-css');
-                styleEl.$.textContent = 'p,li{text-align:justify!important}ol ol{list-style-type:lower-alpha!important}';
-                $.getHead().append(styleEl);
-              }
-              // Also force via DOM for immediate effect
-              $.querySelectorAll('p,li').forEach(el => {
-                el.style.textAlign = 'justify';
-              });
-              $.querySelectorAll('ol ol').forEach(ol => {
-                ol.style.listStyleType = 'lower-alpha';
-              });
-            }
-          } catch(je) {}
-          const ta = document.getElementById('petitum');
-          if (ta) ta.value = html;
-          result.filledFields++;
-          filled = true;
-        } catch(e) { result.errors.push('Petitum: ' + e.message); filled = true; }
-      } else {
-        await new Promise(r => setTimeout(r, 300));
-      }
-    }
-    if (!filled) result.errors.push('Petitum: CKEditor tidak ditemukan');
-  }
+    const map = {
+      sd: 'sekolah dasar', smp: 'sekolah lanjutan tingkat pertama', sltp: 'sekolah lanjutan tingkat pertama', mts: 'sekolah lanjutan tingkat pertama',
+      sma: 'sekolah lanjutan tingkat atas', smk: 'sekolah lanjutan tingkat atas', ma: 'sekolah lanjutan tingkat atas', slta: 'sekolah lanjutan tingkat atas',
+      s1: 'strata i', 'strata 1': 'strata i', s2: 'strata ii', 'strata 2': 'strata ii', s3: 'strata iii', 'strata 3': 'strata iii',
+      d1: 'diploma i', d2: 'diploma ii', d3: 'diploma iii', d4: 'diploma iv', tk: 'taman kanak-kanak', paud: 'taman kanak-kanak',
+      'tidak sekolah': 'tidak ada', 'belum sekolah': 'tidak ada', penggugat: 'penggugat/pemohon', pemohon: 'penggugat/pemohon',
+      tergugat: 'tergugat/termohon', termohon: 'tergugat/termohon', 'orang tua': 'orang tua p atau t', 'orang tua p/t': 'orang tua p atau t',
+      'orang tua p atau t': 'orang tua p atau t', 'lain lain': 'lain-lain', 'lain-lain': 'lain-lain', lainnya: 'lain-lain',
+      'laki laki': 'laki-laki', 'laki-laki': 'laki-laki', perempuan: 'perempuan',
+    };
 
-  // Fill Obyek Sengketa (plain textarea) — skip while the separate Data Anak popup is open.
-  if (!isDataAnakForm && data.obyek_sengketa) {
-    const ta = document.getElementById('obyek_gugatan');
-    if (ta) { setVal(ta, data.obyek_sengketa); result.filledFields++; }
-    else result.errors.push('Obyek Sengketa: tidak ditemukan');
-  }
+    let wanted = map[valueNorm] || valueNorm;
 
-  // Fill marriage info fields (Edit Data Umum form) — skip while the separate Data Anak popup is open.
-  if (!isDataAnakForm && data.marriage_info) {
-    const mi = data.marriage_info;
-    const marriageFields = [
-      ['tgl_nikah', mi.tanggal_menikah],
-      ['tgl_kutipan_akta_nikah', mi.tanggal_dicatat],
-      ['no_kutipan_akta_nikah', mi.nomor_akta_nikah],
-    ];
-    for (const [id, val] of marriageFields) {
-      if (!val) continue;
-      const el = document.getElementById(id);
-      if (el) {
-        setVal(el, val);
-        result.filledFields++;
-      }
+    if (isDiasuh) {
+      if (valueNorm.includes('penggugat') || valueNorm.includes('pemohon')) wanted = 'penggugat/pemohon';
+      else if (valueNorm.includes('tergugat') || valueNorm.includes('termohon')) wanted = 'tergugat/termohon';
+      else if (valueNorm === 'p') wanted = 'penggugat/pemohon';
+      else if (valueNorm === 't') wanted = 'tergugat/termohon';
     }
 
-    // KUA dropdown — try Select2 first, fallback to vanilla JS
-    if (mi.kua_dicatat) {
-      let found = false;
-      // Strategy 1: jQuery/Select2 (if available)
-      if (typeof jQuery !== 'undefined') {
-        try {
-          const $kua = jQuery('#ref_kua');
-          if ($kua.length) {
-            const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
-            $kua.find('option').each(function() {
-              const t = jQuery(this).text().toLowerCase().replace(/\s+/g, '');
-              if (t.includes(v) || v.includes(t) || t.includes(mi.kua_dicatat.toLowerCase())) {
-                $kua.val(jQuery(this).val()).trigger('change');
-                // Update Select2 display if exists
-                const $container = jQuery('#select2-ref_kua-container');
-                if ($container.length) {
-                  $container.attr('title', jQuery(this).text()).text(jQuery(this).text());
-                }
-                found = true;
-                return false; // break
-              }
-            });
-          }
-        } catch(e) {}
-      }
-      // Strategy 2: Vanilla JS fallback (when jQuery not available)
-      if (!found) {
-        const kuaEl = document.getElementById('ref_kua');
-        if (kuaEl) {
-          const v = mi.kua_dicatat.toLowerCase().replace(/\s+/g, '');
-          for (const opt of kuaEl.options) {
-            const t = opt.text.toLowerCase().replace(/\s+/g, '');
-            if (t.includes(v) || v.includes(t) || t.includes(mi.kua_dicatat.toLowerCase())) {
-              kuaEl.value = opt.value;
-              kuaEl.dispatchEvent(new Event('change', { bubbles: true }));
-              found = true;
-              break;
-            }
-          }
-        }
+    if (isPendidikan) {
+      if (valueNorm.includes('belum sekolah') || valueNorm.includes('tidak sekolah') || valueNorm.includes('belum tamat')) wanted = 'tidak ada';
+      else if (/\bsd\b/.test(valueNorm)) wanted = 'sekolah dasar';
+      else if (/\b(smp|sltp|mts)\b/.test(valueNorm)) wanted = 'sekolah lanjutan tingkat pertama';
+      else if (/\b(sma|smk|slta|ma)\b/.test(valueNorm)) wanted = 'sekolah lanjutan tingkat atas';
+    }
+
+    if (isJenisKelamin) {
+      if (['l', 'lk'].includes(valueNorm)) wanted = 'laki-laki';
+      if (['p', 'pr'].includes(valueNorm)) wanted = 'perempuan';
+    }
+
+    const options = Array.from(select.options || []);
+    let option = null;
+    if (isDiasuh || isPendidikan || isJenisKelamin) {
+      option = options.find(o => norm(o.textContent || o.text) === wanted || compact(o.textContent || o.text) === compact(wanted));
+    }
+    if (!option) option = options.find(o => String(o.value) === raw);
+    if (!option) option = options.find(o => {
+      const t = norm(o.textContent || o.text);
+      return t === wanted || t.includes(wanted) || wanted.includes(t) || compact(t).includes(compact(wanted)) || compact(wanted).includes(compact(t));
+    });
+    return selectOption(select, option);
+  }
+
+  function textToHtml(text) {
+    if (!text) return '';
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      return text.replace(/<p(\s[^>]*)?>/gi, '<p$1 style="text-align:justify">').replace(/<li(\s[^>]*)?>/gi, '<li$1 style="text-align:justify">');
+    }
+
+    const lines = String(text).split(/\r?\n/);
+    let html = '';
+    let inMainOl = false;
+    let currentMainOpen = false;
+    let inSubList = false;
+
+    const closeSub = () => { if (inSubList) { html += '</ul>'; inSubList = false; } };
+    const closeMainLi = () => { if (currentMainOpen) { closeSub(); html += '</li>'; currentMainOpen = false; } };
+    const closeMainOl = () => { closeMainLi(); if (inMainOl) { html += '</ol>'; inMainOl = false; } };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        closeMainOl();
+        html += '<p style="text-align:justify">&nbsp;</p>';
+        continue;
       }
 
-      // Strategy 3: AJAX lookup. Try full term first, then short with disambiguation.
-      // Full term e.g. "Kramat Jati, Kota Jakarta Timur" — most specific.
-      // Short term e.g. "Kramat Jati" — if multiple matches, pick the one
-      // whose text contains the city part (after comma) from the full term.
-      // Try Select2 AJAX config first, fallback to hardcoded endpoint
-      let ajaxUrl = '/SIPP/kua/cari';
-      let ajaxType = 'get';
-      let select2DataFn = null;
+      const subDecimal = line.match(/^(\d+\.\d+\.?)(\s+.+)$/);
+      const subAlpha = line.match(/^([a-z])[.)]\s+(.+)$/i);
+      const main = line.match(/^(\d+)[.)]\s+(.+)$/);
+
+      if (subDecimal && currentMainOpen) {
+        if (!inSubList) { html += '<ul style="list-style-type:none;margin-left:20px;padding-left:0">'; inSubList = true; }
+        html += `<li style="text-align:justify">${line}</li>`;
+        continue;
+      }
+
+      if (subAlpha && currentMainOpen) {
+        if (!inSubList) { html += '<ul style="list-style-type:none;margin-left:20px;padding-left:0">'; inSubList = true; }
+        html += `<li style="text-align:justify">${subAlpha[1]}. ${subAlpha[2]}</li>`;
+        continue;
+      }
+
+      if (main && !/^\d+\.\d+/.test(line)) {
+        closeMainLi();
+        if (!inMainOl) { html += '<ol>'; inMainOl = true; }
+        html += `<li style="text-align:justify">${main[2]}`;
+        currentMainOpen = true;
+        continue;
+      }
+
+      if (currentMainOpen) html += `<br>${line}`;
+      else {
+        closeMainOl();
+        html += `<p style="text-align:justify">${line}</p>`;
+      }
+    }
+
+    closeMainOl();
+    return html;
+  }
+
+  function fillEditor(id, value) {
+    const html = textToHtml(value);
+    if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances?.[id]) {
+      CKEDITOR.instances[id].setData(html);
+      const textarea = document.getElementById(id);
+      if (textarea) textarea.value = html;
+      return true;
+    }
+    const textarea = document.getElementById(id);
+    return textarea ? setVal(textarea, html) : false;
+  }
+
+  function dispatchTyping(input, term) {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    input.focus();
+    input.click();
+    try { setter ? setter.call(input, '') : (input.value = ''); } catch (_) { input.value = ''; }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    try { setter ? setter.call(input, term) : (input.value = term); } catch (_) { input.value = term; }
+
+    ['keydown', 'keypress', 'input', 'keyup', 'change'].forEach(type => {
+      const ev = type.startsWith('key')
+        ? new KeyboardEvent(type, { bubbles: true, cancelable: true, key: term.slice(-1) || 'g', code: 'KeyG', keyCode: 71, which: 71 })
+        : new Event(type, { bubbles: true, cancelable: true });
+      input.dispatchEvent(ev);
+    });
+
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(input).val(term).trigger('keydown').trigger('keypress').trigger('input').trigger('keyup').trigger('change'); } catch (_) {}
+    }
+  }
+
+  function clickLikeUser(el) {
+    if (!el) return false;
+    ['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(type => {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+    try { el.click(); } catch (_) {}
+    return true;
+  }
+
+  function findKuaSearchInput() {
+    return document.querySelector('.select2-container--open .select2-search__field') ||
+      document.querySelector('input[aria-controls="select2-ref_kua-results"]') ||
+      document.querySelector('.select2-container--open input[type="search"]') ||
+      document.querySelector('.select2-container--open input[type="text"]') ||
+      document.querySelector('input.select2-search__field') ||
+      document.querySelector('.select2-search input') ||
+      document.querySelector('input[role="searchbox"]');
+  }
+
+  function findKuaResult(wanted, term) {
+    const selectors = [
+      '#select2-ref_kua-results .select2-results__option',
+      '.select2-results__option[role="option"]',
+      '.select2-results__option',
+      '.select2-results li',
+      '.select2-result',
+      '.select2-result-label',
+      'ul.ui-autocomplete li',
+      '.ui-menu-item',
+      '.ac_results li',
+      '.autocomplete-suggestions div',
+      '.autocomplete-suggestion'
+    ].join(',');
+
+    const items = Array.from(document.querySelectorAll(selectors)).filter(el => {
+      const text = norm(el.textContent);
+      return text && !text.includes('mencari') && !text.includes('searching') && !text.includes('tidak ditemukan') && !text.includes('no results');
+    });
+
+    let match = items.find(el => kuaMatches(el.textContent, wanted)) || items.find(el => kuaMatches(el.textContent, term));
+    if (!match) return null;
+
+    if (match.classList.contains('select2-result-label')) {
+      return match.closest('li, .select2-result') || match;
+    }
+    return match;
+  }
+
+  async function fillKua(value) {
+    const wanted = String(value || '').trim();
+    if (!wanted) return false;
+
+    const select = document.getElementById('ref_kua');
+    if (!select) {
+      result.errors.push('KUA Tempat Menikah: #ref_kua tidak ditemukan. Buka popup Edit Data Umum terlebih dahulu.');
+      return false;
+    }
+
+    const existing = Array.from(select.options || []);
+    const optionFromExisting = existing.find(o => o.value && kuaMatches(o.textContent || o.text, wanted));
+    if (optionFromExisting && selectOption(select, optionFromExisting)) return true;
+
+    const district = cleanKua(wanted).split(/\s+/).find(Boolean) || wanted;
+    const optionByDistrict = existing.find(o => o.value && cleanKua(o.textContent || o.text).split(/\s+/).includes(district));
+    if (optionByDistrict && selectOption(select, optionByDistrict)) return true;
+
+    const terms = [district, wanted.split(',')[0].trim(), cleanKua(wanted), wanted]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+    for (const term of terms) {
       try {
-        const $kuaSel = jQuery('#ref_kua');
-        const ajaxConfig = $kuaSel.data('select2')?.options?.options?.ajax;
-        if (ajaxConfig?.url) { ajaxUrl = ajaxConfig.url; }
-        if (ajaxConfig?.type) { ajaxType = ajaxConfig.type; }
-        if (typeof ajaxConfig?.data === 'function') { select2DataFn = ajaxConfig.data; }
-      } catch(_) {}
+        // Open Select2 the way a user does. Do not rely only on jQuery(select).data('select2'),
+        // because SIPP sometimes initializes Select2 inside a popup after the extension loads.
+        const container = document.getElementById('select2-ref_kua-container') ||
+          document.querySelector('#ref_kua + .select2 .select2-selection') ||
+          document.querySelector('span.select2[style*="550px"] .select2-selection') ||
+          document.querySelector('.select2-selection[aria-labelledby="select2-ref_kua-container"]');
 
-      const fullTerm = mi.kua_dicatat;
-      const shortTerm = fullTerm.split(',')[0].trim();
-      const cityPart = fullTerm.includes(',') ? fullTerm.split(',').slice(1).join(',').trim() : '';
-      const url = ajaxUrl || '/SIPP/kua/cari';
-
-      // Helper: send AJAX using Select2's data function if available,
-      // otherwise build payload manually ({q: term} for GET, {term: term} for POST)
-      function kuaSearch(term) {
-        return new Promise((resolve) => {
-          let ajaxData;
-          if (select2DataFn) {
-            // Use Select2's own data mapper — it knows the right param name
-            try { ajaxData = select2DataFn({ term }); } catch(_) { ajaxData = { q: term }; }
-          } else {
-            ajaxData = ajaxType.toLowerCase() === 'get' ? { q: term } : { term };
-          }
-          jQuery.ajax({
-            url, type: ajaxType, dataType: 'json', data: ajaxData,
-            success: (r) => { console.log('[SIPP KUA] response for "' + term + '":', r); resolve(Array.isArray(r) ? r : []); },
-            error: (e) => { console.warn('[SIPP KUA] ajax error for "' + term + '":', e.status, e.statusText); resolve([]); },
-          });
-        });
-      }
-
-      console.log('[SIPP KUA] AJAX strategy — full:', fullTerm, '| short:', shortTerm, '| city:', cityPart, '| url:', url, '| type:', ajaxType);
-
-      // Step 1: try full term
-      let response = await kuaSearch(fullTerm);
-
-      let match = response.find((item) => {
-        const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
-        const v = fullTerm.toLowerCase().replace(/\s+/g, '');
-        return t === v || t.includes(v) || v.includes(t);
-      });
-
-      // Step 2: if no match, try short term
-      if (!match && shortTerm !== fullTerm) {
-        response = await kuaSearch(shortTerm);
-        const v = shortTerm.toLowerCase().replace(/\s+/g, '');
-        const candidates = response.filter((item) => {
-          const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
-          return t.includes(v) || v.includes(t);
-        });
-        console.log('[SIPP KUA] candidates:', candidates);
-        if (candidates.length === 1) {
-          match = candidates[0];
-        } else if (candidates.length > 1 && cityPart) {
-          // Disambiguate: pick the one whose text contains the city name
-          match = candidates.find((item) =>
-            String(item.text || '').toLowerCase().includes(cityPart.toLowerCase())
-          ) || null;
-          console.log('[SIPP KUA] disambiguated:', match);
+        if (typeof jQuery !== 'undefined') {
+          try { jQuery(select).select2('open'); } catch (_) {}
         }
-      }
+        clickLikeUser(container?.closest('.select2-selection') || container);
+        await delay(250);
 
-      // Step 2.5: try short term with spaces removed (SIPP stores "Kramat Jati" as "Kramatjati")
-      if (!match) {
-        const noSpace = shortTerm.replace(/\s+/g, '');
-        if (noSpace !== shortTerm && noSpace.length > 3) {
-          response = await kuaSearch(noSpace);
-          const v = noSpace.toLowerCase();
-          const candidates = response.filter((item) => {
-            const t = String(item.text || '').toLowerCase().replace(/\s+/g, '');
-            return t.includes(v) || v.includes(t);
-          });
-          console.log('[SIPP KUA] noSpace candidates:', candidates);
-          if (candidates.length === 1) {
-            match = candidates[0];
-          } else if (candidates.length > 1 && cityPart) {
-            match = candidates.find((item) =>
-              String(item.text || '').toLowerCase().includes(cityPart.toLowerCase())
-            ) || null;
-          }
+        const input = findKuaSearchInput();
+        if (!input) {
+          console.warn('[SIPP KUA] search input not found for term:', term);
+          continue;
         }
-      }
+        dispatchTyping(input, term);
 
-      // Step 3: if still no match, try first word only (last resort)
-      if (!match && shortTerm.split(/\s+/).length > 1) {
-        const firstWord = shortTerm.split(/\s+/)[0];
-        response = await kuaSearch(firstWord);
-        const v = firstWord.toLowerCase();
-        match = response.find((item) => {
-          const t = String(item.text || '').toLowerCase();
-          return t.includes(v) || v.includes(t);
-        }) || null;
-      }
+        // Poll for results instead of fixed delay — wait up to 3s for AJAX to return
+        let resultEl = null;
+        for (let i = 0; i < 12; i++) {
+          await delay(250);
+          resultEl = findKuaResult(wanted, term);
+          if (resultEl) break;
+        }
+        if (resultEl) {
+          clickLikeUser(resultEl);
+          await delay(350);
 
-      if (match?.id) {
-        if (!$kua.find(`option[value="${match.id}"]`).length) {
-          $kua.append(new Option(match.text, match.id, true, true));
+          const selectedText = document.getElementById('select2-ref_kua-container')?.textContent || '';
+          if (selectedText && (kuaMatches(selectedText, wanted) || kuaMatches(selectedText, term))) return true;
+
+          const refreshed = Array.from(select.options || []).find(o => o.selected || kuaMatches(o.textContent || o.text, wanted));
+          if (refreshed && selectOption(select, refreshed)) return true;
         }
-        $kua.val(match.id).trigger('change');
-        const $container = jQuery('#select2-ref_kua-container');
-        if ($container.length) {
-          $container.attr('title', match.text).text(match.text);
-        }
-        found = true;
-        console.log('[SIPP KUA] ✅ selected:', match.text, 'id:', match.id);
-      } else {
-        console.log('[SIPP KUA] ❌ no match found for:', fullTerm);
-      }
-      if (found) result.filledFields++;
-      else result.errors.push('KUA Dicatat: tidak ditemukan (' + mi.kua_dicatat + ')');
+      } catch (_) {}
+    }
+
+    result.errors.push(`KUA Tempat Menikah: dropdown muncul manual, tapi script belum berhasil memilih (${wanted}). Coba klik field KUA sekali lalu klik Fill lagi.`);
+    return false;
+  }
+
+  if (!isDataAnakForm) {
+    if (data.tanggal_surat) {
+      const el = document.getElementById('tgl_surat');
+      if (el && setVal(el, data.tanggal_surat)) result.filledFields++;
+      else result.errors.push('Tanggal Surat: #tgl_surat tidak ditemukan.');
+    }
+
+    const mi = data.marriage_info || {};
+    for (const [label, id, value] of [
+      ['Tanggal Menikah', 'tgl_nikah', mi.tanggal_menikah],
+      ['Tanggal Kutipan Akta Nikah', 'tgl_kutipan_akta_nikah', mi.tanggal_dicatat],
+      ['Nomor Kutipan Akta Nikah', 'no_kutipan_akta_nikah', mi.nomor_akta_nikah],
+    ]) {
+      if (!value) continue;
+      const el = document.getElementById(id);
+      if (el && setVal(el, value)) result.filledFields++;
+      else result.errors.push(`${label}: #${id} tidak ditemukan.`);
+    }
+
+    if (mi.kua_dicatat) {
+      if (await fillKua(mi.kua_dicatat)) result.filledFields++;
+    }
+
+    if (data.obyek_sengketa) {
+      const el = document.getElementById('obyek_gugatan');
+      if (el && setVal(el, data.obyek_sengketa)) result.filledFields++;
+      else result.errors.push('Obyek Sengketa: #obyek_gugatan tidak ditemukan.');
+    }
+
+    if (data.posita) {
+      let ok = false;
+      for (let i = 0; i < 3 && !ok; i++) { ok = fillEditor('posita', data.posita); if (!ok) await delay(300); }
+      if (ok) result.filledFields++;
+      else result.errors.push('Posita: CKEditor/textarea #posita tidak ditemukan.');
+    }
+
+    if (data.petitum) {
+      let ok = false;
+      for (let i = 0; i < 3 && !ok; i++) { ok = fillEditor('petitum', data.petitum); if (!ok) await delay(300); }
+      if (ok) result.filledFields++;
+      else result.errors.push('Petitum: CKEditor/textarea #petitum tidak ditemukan.');
     }
   }
 
-  // Fill Tanggal Surat — skip while the separate Data Anak popup is open.
-  if (!isDataAnakForm && data.tanggal_surat) {
-    const el = document.getElementById('tgl_surat');
-    console.log('[SIPP MAIN] tgl_surat element:', el, 'value:', data.tanggal_surat);
-    if (el) {
-      setVal(el, data.tanggal_surat);
-      console.log('[SIPP MAIN] tgl_surat after setVal:', el.value);
-      result.filledFields++;
-    } else {
-      console.warn('[SIPP MAIN] ❌ tgl_surat element NOT FOUND');
-    }
-  }
-
-  // Fill children (Data Anak — might be in separate popup)
-  if (data.children && Array.isArray(data.children)) {
+  if (Array.isArray(data.children)) {
     for (const child of data.children) {
-      console.log('[SIPP CHILD] Filling child:', JSON.stringify({...child, _raw: undefined}));
-      // Text inputs — use specific selectors to avoid matching wrong fields
-      const fields = [
-        ['anak_ke', child.anak_ke ? String(child.anak_ke) : '', ['input[name="anak_ke" i]', 'input[id="anak_ke" i]', 'input[name*="anakke" i]']],
-        ['nama', child.nama, ['input[name="nama" i]', 'input[id="nama" i]']],
-        ['nik', child.nik || '', ['input[name="nik" i]', 'input[id="nik" i]', 'input[name*="nik" i]']],
-        ['tempat_lahir', child.tempat_lahir, ['input[name="tempat_lahir" i]', 'input[id="tempat_lahir" i]', 'input[name*="tempatlahir" i]']],
-        ['tanggal_lahir', child.tanggal_lahir, ['input[name="tgl_lahir" i]', 'input[id="tgl_lahir" i]', 'input[name="tanggal_lahir" i]', 'input[id="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
-      ];
-      for (const [key, val, sels] of fields) {
-        if (!val) continue;
-        let filled = false;
-        for (const sel of sels) {
-          const el = document.querySelector(sel);
-          if (el) {
-            setVal(el, val);
-            result.filledFields++;
-            console.log(`[SIPP CHILD] ✅ ${key} = "${val}"`);
-            filled = true;
-            break;
-          }
-        }
-        if (!filled) {
-          console.warn(`[SIPP CHILD] ❌ ${key} not found (selectors: ${sels.join(', ')})`);
-        }
+      for (const [key, value, selectors] of [
+        ['anak_ke', child.anak_ke ? String(child.anak_ke) : '', ['#anak_ke', 'input[name="anak_ke" i]', 'input[name*="anakke" i]']],
+        ['nama', child.nama, ['#nama', 'input[name="nama" i]']],
+        ['nik', child.nik || '', ['#nik', 'input[name="nik" i]', 'input[name*="nik" i]']],
+        ['tempat_lahir', child.tempat_lahir, ['#tempat_lahir', 'input[name="tempat_lahir" i]', 'input[name*="tempatlahir" i]']],
+        ['tanggal_lahir', child.tanggal_lahir, ['#tgl_lahir', 'input[name="tgl_lahir" i]', 'input[name="tanggal_lahir" i]', 'input[name*="tanggallahir" i]']],
+      ]) {
+        if (!value) continue;
+        const el = selectors.map(s => document.querySelector(s)).find(Boolean);
+        if (el && setVal(el, value)) result.filledFields++;
+        else if (isDataAnakForm) result.errors.push(`Data Anak ${key}: field tidak ditemukan.`);
       }
-      // Dropdowns — use specific selectors
-      const dropdowns = [
-        ['jenis_kelamin', child.jenis_kelamin, ['select[name="jenis_kelamin" i]', 'select[id="jenis_kelamin" i]']],
-        ['pendidikan', child.pendidikan, ['select[name="pendidikan" i]', 'select[id="pendidikan" i]', 'select[name="jenis_pendidikan" i]']],
-        ['pengasuhan', child.pengasuhan, ['select[name="diasuh_oleh" i]', 'select[id="diasuh_oleh" i]', 'select[name="diasuh" i]', 'select[id="diasuh" i]', 'select[name*="diasuh" i]', 'select[id*="diasuh" i]']],
-      ];
-      for (const [key, val, sels] of dropdowns) {
-        if (!val) continue;
-        let filled = false;
-        for (const sel of sels) {
-          const el = document.querySelector(sel);
-          if (el && setSelect(el, val)) {
-            result.filledFields++;
-            console.log(`[SIPP CHILD] ✅ ${key} = "${val}" (dropdown)`);
-            filled = true;
-            break;
-          }
-        }
-        if (!filled) {
-          console.warn(`[SIPP CHILD] ❌ ${key} dropdown not found or no match (selectors: ${sels.join(', ')})`);
-        }
+
+      for (const [key, value, selectors] of [
+        ['jenis_kelamin', child.jenis_kelamin, ['#jenis_kelamin', 'select[name="jenis_kelamin" i]']],
+        ['pendidikan', child.pendidikan, ['#pendidikan', 'select[name="pendidikan" i]', 'select[name="jenis_pendidikan" i]']],
+        ['pengasuhan', child.pengasuhan, ['#diasuh_oleh', 'select[name="diasuh_oleh" i]', 'select[name*="diasuh" i]', 'select[id*="diasuh" i]']],
+      ]) {
+        if (!value) continue;
+        const el = selectors.map(s => document.querySelector(s)).find(Boolean);
+        if (el && setSelect(el, value)) result.filledFields++;
+        else if (isDataAnakForm) result.errors.push(`Data Anak ${key}: dropdown tidak ditemukan/tidak cocok.`);
       }
     }
   }
