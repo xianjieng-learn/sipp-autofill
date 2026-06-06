@@ -604,18 +604,27 @@ async function fillSippMainWorld(data) {
     }
 
     const existing = Array.from(select.options || []);
+    console.log(`[SIPP KUA] wanted="${wanted}" existing_options=${existing.length}`);
     const optionFromExisting = existing.find(o => o.value && kuaMatches(o.textContent || o.text, wanted));
-    if (optionFromExisting && selectOption(select, optionFromExisting)) return true;
+    if (optionFromExisting && selectOption(select, optionFromExisting)) {
+      console.log('[SIPP KUA] ✅ matched existing option:', optionFromExisting.textContent);
+      return true;
+    }
 
     const district = cleanKua(wanted).split(/\s+/).find(Boolean) || wanted;
     const optionByDistrict = existing.find(o => o.value && cleanKua(o.textContent || o.text).split(/\s+/).includes(district));
-    if (optionByDistrict && selectOption(select, optionByDistrict)) return true;
+    if (optionByDistrict && selectOption(select, optionByDistrict)) {
+      console.log('[SIPP KUA] ✅ matched by district:', optionByDistrict.textContent);
+      return true;
+    }
 
     const terms = [district, wanted.split(',')[0].trim(), cleanKua(wanted), wanted]
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
+    console.log('[SIPP KUA] trying AJAX search terms:', terms);
 
     for (const term of terms) {
       try {
+        console.log(`[SIPP KUA] term="${term}" — opening Select2...`);
         // Open Select2 the way a user does. Do not rely only on jQuery(select).data('select2'),
         // because SIPP sometimes initializes Select2 inside a popup after the extension loads.
         const container = document.getElementById('select2-ref_kua-container') ||
@@ -631,29 +640,51 @@ async function fillSippMainWorld(data) {
 
         const input = findKuaSearchInput();
         if (!input) {
-          console.warn('[SIPP KUA] search input not found for term:', term);
+          console.warn('[SIPP KUA] ❌ search input not found for term:', term);
           continue;
         }
+        console.log('[SIPP KUA] typing term into search input...');
         dispatchTyping(input, term);
 
         // Poll for results instead of fixed delay — wait up to 3s for AJAX to return
         let resultEl = null;
         for (let i = 0; i < 12; i++) {
           await delay(250);
+          const allResults = document.querySelectorAll(
+            '#select2-ref_kua-results .select2-results__option, .select2-results__option, .select2-results li'
+          );
+          const resultTexts = Array.from(allResults).map(el => el.textContent.trim()).filter(Boolean);
+          if (resultTexts.length > 0) {
+            console.log(`[SIPP KUA] poll #${i + 1}: ${resultTexts.length} results:`, resultTexts.slice(0, 5));
+          }
           resultEl = findKuaResult(wanted, term);
-          if (resultEl) break;
+          if (resultEl) {
+            console.log('[SIPP KUA] found matching result:', resultEl.textContent.trim());
+            break;
+          }
         }
         if (resultEl) {
           clickLikeUser(resultEl);
           await delay(350);
 
           const selectedText = document.getElementById('select2-ref_kua-container')?.textContent || '';
-          if (selectedText && (kuaMatches(selectedText, wanted) || kuaMatches(selectedText, term))) return true;
+          if (selectedText && (kuaMatches(selectedText, wanted) || kuaMatches(selectedText, term))) {
+            console.log('[SIPP KUA] ✅ selection verified via container text:', selectedText);
+            return true;
+          }
 
           const refreshed = Array.from(select.options || []).find(o => o.selected || kuaMatches(o.textContent || o.text, wanted));
-          if (refreshed && selectOption(select, refreshed)) return true;
+          if (refreshed && selectOption(select, refreshed)) {
+            console.log('[SIPP KUA] ✅ selection verified via option refresh:', refreshed.textContent);
+            return true;
+          }
+          console.warn('[SIPP KUA] clicked result but selection not verified. container text:', selectedText);
+        } else {
+          console.warn(`[SIPP KUA] ❌ no matching result found after 3s polling for term="${term}"`);
         }
-      } catch (_) {}
+      } catch (e) {
+        console.error('[SIPP KUA] error during AJAX search:', e);
+      }
     }
 
     result.errors.push(`KUA Tempat Menikah: dropdown muncul manual, tapi script belum berhasil memilih (${wanted}). Coba klik field KUA sekali lalu klik Fill lagi.`);
