@@ -1,2 +1,1 @@
-/* SIPP AutoFill recovery placeholder */
-console.log('SIPP AutoFill popup recovered.');
+const jsonInput=document.getElementById('jsonInput'),btnPaste=document.getElementById('btnPaste'),btnParse=document.getElementById('btnParse'),btnFillAll=document.getElementById('btnFillAll'),statusEl=document.getElementById('status'),previewEl=document.getElementById('preview'),childrenList=document.getElementById('childrenList');let parsedData=null,selectedChild=null;function st(m,t='info'){statusEl.textContent=m;statusEl.className=`status show ${t}`}function ne(...a){for(const x of a)if(x!=null&&String(x).trim()!=='')return String(x).trim();return''}function n(s){return String(s||'').to
