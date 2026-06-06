@@ -611,12 +611,9 @@ async function fillSippMainWorld(data) {
       return true;
     }
 
+    // Skip district matching — go straight to AJAX for reliable disambiguation
+    // District matching was causing wrong picks when multiple KUA share the same name (e.g. "Baturetno" in Wonogiri vs Surakarta)
     const district = cleanKua(wanted).split(/\s+/).find(Boolean) || wanted;
-    const optionByDistrict = existing.find(o => o.value && cleanKua(o.textContent || o.text).split(/\s+/).includes(district));
-    if (optionByDistrict && selectOption(select, optionByDistrict)) {
-      console.log('[SIPP KUA] ✅ matched by district:', optionByDistrict.textContent);
-      return true;
-    }
 
     const terms = [district, wanted.split(',')[0].trim(), cleanKua(wanted), wanted]
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
