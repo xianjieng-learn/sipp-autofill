@@ -135,7 +135,7 @@ function normalizeChild(c) {
     tanggal_lahir: normalizeDate(tanggal),
     jenis_kelamin: firstNonEmpty(c.jenis_kelamin, c.jenisKelamin, c.jk, c.kelamin),
     pendidikan: firstNonEmpty(c.pendidikan, c.jenis_pendidikan),
-    pengasuhan: firstNonEmpty(c.pengasuhan, c.diasuh_oleh, c.diasuhOleh, c.diasuh, c.hadhanah),
+    pengasuhan: firstNonEmpty(c.pengasuhan, c.diasuh_oleh, c.diasuhOleh, c.diasuh, c.hadhanah) || 'Penggugat',
   };
 }
 
