@@ -151,11 +151,12 @@ function parseJSON() {
     if (parsedData.children.length) {
       showStatus(`✅ Terdeteksi ${parsedData.children.length} anak. Siap di-fill.`, 'success');
       renderChildren(parsedData.children);
+      document.getElementById('autoSaveRow').style.display = parsedData.children.length > 1 ? 'flex' : 'none';
     } else {
       showStatus('✅ Data siap di-fill ke SIPP.', 'success');
       childrenList.innerHTML = '';
       childrenList.style.display = 'none';
-      selectedChild = null;
+      document.getElementById('autoSaveRow').style.display = 'none';
     }
   } catch (e) {
     showStatus(`❌ JSON tidak valid: ${e.message}`, 'error');
@@ -226,21 +227,71 @@ async function fillAllSipp() {
     const isSippPage = tab && ['ecourt.mahkamahagung.go.id', '25.24.23.7'].some(host => tab.url.includes(host));
     if (!isSippPage) return showStatus('❌ Buka halaman SIPP/eCourt dulu.', 'error');
 
-    const dataForFill = selectedChild ? { ...parsedData, children: [selectedChild] } : parsedData;
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: fillSippMainWorld,
-      args: [dataForFill],
-    });
+    const autoSave = document.getElementById('autoSaveToggle')?.checked && parsedData?.children?.length > 1;
+    const dataForFill = autoSave
+      ? { ...parsedData, autoSave: true }
+      : selectedChild ? { ...parsedData, children: [selectedChild] } : parsedData;
 
-    renderFillResult(results?.[0]?.result || { success: false, errors: ['Tidak ada response dari halaman SIPP'] });
+    if (autoSave) {
+      // Auto-fill all children sequentially with save-and-add between each
+      const children = parsedData.children;
+      showStatus(`🔄 Auto-fill ${children.length} anak...`, 'info');
+
+      for (let i = 0; i < children.length; i++) {
+        const isLast = i === children.length - 1;
+        const childData = { ...parsedData, children: [children[i]], isLastChild: isLast };
+        showStatus(`⏳ Mengisi anak ${i + 1}/${children.length}: ${children[i].nama || ''}...`, 'info');
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: fillSippMainWorld,
+          args: [childData],
+        });
+
+        const res = results?.[0]?.result;
+        if (res?.submitted) {
+          // Wait for page to reload after form submission
+          await waitForTabLoad(tab.id, 8000);
+          await new Promise(r => setTimeout(r, 500)); // extra settle time
+        }
+
+        if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
+      }
+
+      showStatus(`✅ Berhasil isi ${children.length} anak!`, 'success');
+    } else {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: fillSippMainWorld,
+        args: [dataForFill],
+      });
+      renderFillResult(results?.[0]?.result || { success: false, errors: ['Tidak ada response dari halaman SIPP'] });
+    }
   } catch (e) {
     showStatus(`❌ Error: ${e.message}. Coba refresh halaman SIPP.`, 'error');
   } finally {
     btnFillAll.disabled = false;
     btnFillAll.textContent = '⚡ Fill Semua ke SIPP';
   }
+}
+
+function waitForTabLoad(tabId, timeout = 8000) {
+  return new Promise(resolve => {
+    let done = false;
+    const listener = (id, info) => {
+      if (id === tabId && info.status === 'complete' && !done) {
+        done = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      if (!done) { done = true; chrome.tabs.onUpdated.removeListener(listener); resolve(); }
+    }, timeout);
+  });
 }
 
 function renderFillResult(response) {
@@ -845,6 +896,19 @@ async function fillSippMainWorld(data) {
         const el = selectors.map(s => document.querySelector(s)).find(Boolean);
         if (el && setSelect(el, value)) result.filledFields++;
         else if (isDataAnakForm) result.errors.push(`Data Anak ${key}: dropdown tidak ditemukan/tidak cocok.`);
+      }
+
+      // Auto-save: click "Simpan dan Tambah Anak" if not the last child
+      if (data.autoSave && !data.isLastChild && isDataAnakForm) {
+        const saveBtn = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'))
+          .find(el => /simpan.*tambah/i.test(el.textContent || el.value || ''));
+        if (saveBtn) {
+          saveBtn.click();
+          result.submitted = true;
+          result.filledFields++; // count the save action
+        } else {
+          result.errors.push('Auto-save: tombol "Simpan dan Tambah Anak" tidak ditemukan.');
+        }
       }
     }
   }
