@@ -363,16 +363,31 @@ async function fillSippMainWorld(data) {
   }
 
   function kuaMatches(optionText, wantedText) {
+    // Score-based: returns true only for GOOD matches, not loose token overlap
     const optionNorm = norm(optionText);
     const wantedNorm = norm(wantedText);
     const optionClean = cleanKua(optionText);
     const wantedClean = cleanKua(wantedText);
     if (!optionNorm || !wantedNorm) return false;
-    return optionNorm === wantedNorm || optionNorm.includes(wantedNorm) || wantedNorm.includes(optionNorm) ||
-      compact(optionNorm).includes(compact(wantedNorm)) || compact(wantedNorm).includes(compact(optionNorm)) ||
-      optionClean === wantedClean || optionClean.includes(wantedClean) || wantedClean.includes(optionClean) ||
-      compact(optionClean).includes(compact(wantedClean)) || compact(wantedClean).includes(compact(optionClean)) ||
-      tokenSubset(wantedText, optionText) || tokenSubset(optionText, wantedText);
+
+    // Exact match
+    if (optionNorm === wantedNorm || optionClean === wantedClean) return true;
+
+    // Substring: option contains the full wanted text (good match)
+    if (optionClean.includes(wantedClean) && wantedClean.length > 3) return true;
+    if (optionNorm.includes(wantedNorm) && wantedNorm.length > 3) return true;
+
+    // Wanted contains full option text (option is shorter — OK if long enough)
+    if (wantedClean.includes(optionClean) && optionClean.length > 6) return true;
+
+    // Compact comparisons (only for longer strings)
+    const optC = compact(optionNorm);
+    const wantC = compact(wantedNorm);
+    if (optC.includes(wantC) && wantC.length > 4) return true;
+    if (wantC.includes(optC) && optC.length > 6) return true;
+
+    // Token subset: ALL wanted tokens must appear in option
+    return tokenSubset(wantedText, optionText);
   }
 
   function selectOption(select, option, displayText) {
@@ -613,9 +628,12 @@ async function fillSippMainWorld(data) {
 
     // Skip district matching — go straight to AJAX for reliable disambiguation
     // District matching was causing wrong picks when multiple KUA share the same name (e.g. "Baturetno" in Wonogiri vs Surakarta)
-    const district = cleanKua(wanted).split(/\s+/).find(Boolean) || wanted;
+    const cleanFull = cleanKua(wanted);
+    const beforeComma = wanted.split(',')[0].trim();
 
-    const terms = [district, wanted.split(',')[0].trim(), cleanKua(wanted), wanted]
+    // Search order: most specific first. Full cleaned name narrows results best.
+    // e.g. "Pondok Gede, Kota Bekasi" → ["pondok gede", "Pondok Gede", "Pondok Gede, Kota Bekasi", "Pondok"]
+    const terms = [cleanFull, beforeComma, wanted, cleanFull.split(/\s+/).find(Boolean) || wanted]
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
     console.log('[SIPP KUA] trying AJAX search terms:', terms);
 
