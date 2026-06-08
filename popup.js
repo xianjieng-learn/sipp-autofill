@@ -631,8 +631,11 @@ async function fillSippMainWorld(data) {
 
         if (typeof jQuery !== 'undefined') {
           try { jQuery(select).select2('open'); } catch (_) {}
+        } else {
+          // Only click if jQuery select2('open') wasn't used — click toggles,
+          // so clicking after select2('open') would CLOSE the dropdown.
+          clickLikeUser(container?.closest('.select2-selection') || container);
         }
-        clickLikeUser(container?.closest('.select2-selection') || container);
         await delay(250);
 
         const input = findKuaSearchInput();
