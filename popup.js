@@ -684,6 +684,68 @@ async function fillSippMainWorld(data) {
       }
     }
 
+    // ── FINAL FALLBACK: Direct AJAX to SIPP KUA endpoint ──
+    try {
+      const ajaxUrl = (select.dataset.ajaxUrl || '/SIPP/kua/cari').replace(/\/$/, '');
+      for (const term of terms) {
+        try {
+          const resp = await fetch(`${ajaxUrl}?term=${encodeURIComponent(term)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          });
+          if (!resp.ok) continue;
+          const data = await resp.json();
+          // SIPP may return {results: [{id, text}, ...]} (Select2 v4) or plain array
+          const items = Array.isArray(data) ? data : (data.results || []);
+          const match = items.find(r => kuaMatches(r.text || r.nama || '', wanted)) ||
+                        items.find(r => kuaMatches(r.text || r.nama || '', term));
+          if (match) {
+            const id = match.id || match.value || match.kode;
+            const text = match.text || match.nama || '';
+            // Remove old placeholder option if present
+            const placeholder = Array.from(select.options).find(o => !o.value);
+            if (placeholder) placeholder.remove();
+            // Add and select the new option
+            const opt = new Option(text, id, true, true);
+            select.add(opt);
+            select.value = id;
+            if (typeof jQuery !== 'undefined') {
+              jQuery(select).val(id).trigger('change').trigger('input');
+            }
+            await delay(100);
+            // Verify
+            const container2 = document.getElementById('select2-ref_kua-container');
+            if (container2 && (kuaMatches(container2.textContent, wanted) || select.value == id)) return true;
+            if (select.value == id) return true;
+          }
+        } catch (_) {}
+      }
+      // Try jQuery Select2 AJAX transport directly
+      if (typeof jQuery !== 'undefined' && jQuery.fn.select2) {
+        try {
+          const s2data = jQuery(select).data('select2');
+          if (s2data && s2data.dataAdapter) {
+            for (const term of terms) {
+              const params = { term: term, page: {} };
+              const results = await new Promise((resolve, reject) => {
+                s2data.dataAdapter.query(params, resolve);
+                setTimeout(() => reject(new Error('timeout')), 5000);
+              });
+              const items = results.results || results || [];
+              const match = items.find(r => kuaMatches(r.text || '', wanted)) ||
+                            items.find(r => kuaMatches(r.text || '', term));
+              if (match) {
+                const opt = new Option(match.text, match.id, true, true);
+                select.add(opt);
+                jQuery(select).val(match.id).trigger('change').trigger('input');
+                await delay(100);
+                return true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
     result.errors.push(`KUA Tempat Menikah: dropdown muncul manual, tapi script belum berhasil memilih (${wanted}). Coba klik field KUA sekali lalu klik Fill lagi.`);
     return false;
   }
