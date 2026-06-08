@@ -39,7 +39,10 @@ Chrome extension (Manifest V3) that auto-fills SIPP forms (Pengadilan Agama Jaka
 1. **CKEditor fields** — Cannot set value via DOM. Must use `CKEDITOR.instances[name].setData(html)` + sync to hidden textarea
 2. **jQuery datepicker** — `setDate` expects Date object, not string. Parse DD/MM/YYYY → `new Date(y, m-1, d)` first
 3. **Data Anak popup** — Loads into same DOM but hidden. `isDataAnakForm` must check VISIBILITY (getComputedStyle), not just element existence
-4. **KUA Select2** — SIPP only preloads saved KUA options. For new KUA, must fetch via AJAX `/SIPP/kua/cari`, append option, then trigger change
+4. **KUA Select2** — SIPP only preloads saved KUA options. For new KUA, must fetch via AJAX `/SIPP/kua/cari`, append option, then trigger change. The `fillKua()` function uses a 3-tier strategy:
+   - **Tier 1**: Match from existing `<option>` elements
+   - **Tier 2**: Open Select2 dropdown, type in search input, poll for AJAX results (up to 3s)
+   - **Tier 3**: Direct fetch to `/SIPP/kua/cari?term=...` + jQuery Select2 `dataAdapter.query()` as last resort
 5. **Extension reload** — After code changes, user must click Reload in `chrome://extensions`
 
 ## JSON Format (from PTSP Helper)
