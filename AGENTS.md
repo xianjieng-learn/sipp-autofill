@@ -43,6 +43,8 @@ Chrome extension (Manifest V3) that auto-fills SIPP forms (Pengadilan Agama Jaka
    - **Tier 1**: Match from existing `<option>` elements
    - **Tier 2**: Open Select2 dropdown, type in search input, poll for AJAX results (up to 3s)
    - **Tier 3**: Direct fetch to `/SIPP/kua/cari?term=...` + jQuery Select2 `dataAdapter.query()` as last resort
+   - **CRITICAL**: After `jQuery(el).select2('open')`, do NOT also `clickLikeUser()` on the container — the click toggles the dropdown closed. The open and click approaches are mutually exclusive.
+   - **CRITICAL**: The `/SIPP/kua/cari` endpoint does NOT work with bare `fetch()` — it only returns results through Select2's internal AJAX transport. Use jQuery triggers (`jQuery(input).val(term).trigger('input').trigger('keyup')`) to fire the search, not native DOM events.
 5. **Extension reload** — After code changes, user must click Reload in `chrome://extensions`
 
 ## JSON Format (from PTSP Helper)
