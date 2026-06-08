@@ -380,11 +380,16 @@ async function fillSippMainWorld(data) {
     // Wanted contains full option text (option is shorter — OK if long enough)
     if (wantedClean.includes(optionClean) && optionClean.length > 6) return true;
 
-    // Compact comparisons (only for longer strings)
+    // Compact comparisons — handles "Pondok Gede" vs "Pondokgede" (no-space variant)
     const optC = compact(optionNorm);
     const wantC = compact(wantedNorm);
     if (optC.includes(wantC) && wantC.length > 4) return true;
     if (wantC.includes(optC) && optC.length > 6) return true;
+    // Also compact the cleaned (KUA/kab/kota stripped) versions
+    const optCC = compact(optionClean);
+    const wantCC = compact(wantedClean);
+    if (optCC.includes(wantCC) && wantCC.length > 3) return true;
+    if (wantCC.includes(optCC) && optCC.length > 5) return true;
 
     // Token subset: ALL wanted tokens must appear in option
     return tokenSubset(wantedText, optionText);
@@ -632,8 +637,9 @@ async function fillSippMainWorld(data) {
     const beforeComma = wanted.split(',')[0].trim();
 
     // Search order: most specific first. Full cleaned name narrows results best.
-    // e.g. "Pondok Gede, Kota Bekasi" → ["pondok gede", "Pondok Gede", "Pondok Gede, Kota Bekasi", "Pondok"]
-    const terms = [cleanFull, beforeComma, wanted, cleanFull.split(/\s+/).find(Boolean) || wanted]
+    // e.g. "Pondok Gede, Kota Bekasi" → ["pondok gede", "Pondok Gede", "Pondokgede", "Pondok Gede, Kota Bekasi", "Pondok"]
+    const noSpace = beforeComma.replace(/\s+/g, ''); // "Pondokgede" for no-space variant
+    const terms = [cleanFull, beforeComma, noSpace, wanted, cleanFull.split(/\s+/).find(Boolean) || wanted]
       .filter((v, i, arr) => v && arr.indexOf(v) === i);
     console.log('[SIPP KUA] trying AJAX search terms:', terms);
 
