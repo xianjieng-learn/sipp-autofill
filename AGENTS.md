@@ -39,13 +39,16 @@ Chrome extension (Manifest V3) that auto-fills SIPP forms (Pengadilan Agama Jaka
 1. **CKEditor fields** — Cannot set value via DOM. Must use `CKEDITOR.instances[name].setData(html)` + sync to hidden textarea
 2. **jQuery datepicker** — `setDate` expects Date object, not string. Parse DD/MM/YYYY → `new Date(y, m-1, d)` first
 3. **Data Anak popup** — Loads into same DOM but hidden. `isDataAnakForm` must check VISIBILITY (getComputedStyle), not just element existence
-4. **KUA Select2** — SIPP only preloads saved KUA options. For new KUA, must fetch via AJAX `/SIPP/kua/cari`, append option, then trigger change. The `fillKua()` function uses a 3-tier strategy:
+4. **Data Anak form submit** — The only submit button is **"Simpan"** (NOT "Simpan dan Tambah Anak"). After clicking Simpan, the form POSTs to `addAnakPihak/validateInput`, the page reloads, and the popup closes. To add another child, must reopen the popup by clicking the "Tambah Data Anak" button on the case detail page. The `reopenDataAnakPopup()` function handles this with 4 fallback strategies (onclick, text match, href match, popup_form direct call).
+5. **Data Anak autoSave flow** — Fill child → click Simpan → page reloads → popup closes → reopen popup → fill next child. The `waitForTabLoad` works here because Simpan does a real form POST (not AJAX).
+6. **Data Anak form selectors** — Form ID is `#frm_user`, action contains `addAnakPihak`. Fields: `#anak_ke`, `#nama`, `#nik`, `#tempat_lahir`, `#tgl_lahir`, `#jenis_kelamin` (select, values 0/1/2), `#pendidikan` (select), `#diasuh_oleh` (select, NOT `pengasuhan`)
+7. **KUA Select2** — SIPP only preloads saved KUA options. For new KUA, must fetch via AJAX `/SIPP/kua/cari`, append option, then trigger change. The `fillKua()` function uses a 3-tier strategy:
    - **Tier 1**: Match from existing `<option>` elements
    - **Tier 2**: Open Select2 dropdown, type in search input, poll for AJAX results (up to 3s)
    - **Tier 3**: Direct fetch to `/SIPP/kua/cari?term=...` + jQuery Select2 `dataAdapter.query()` as last resort
    - **CRITICAL**: After `jQuery(el).select2('open')`, do NOT also `clickLikeUser()` on the container — the click toggles the dropdown closed. The open and click approaches are mutually exclusive.
    - **CRITICAL**: The `/SIPP/kua/cari` endpoint does NOT work with bare `fetch()` — it only returns results through Select2's internal AJAX transport. Use jQuery triggers (`jQuery(input).val(term).trigger('input').trigger('keyup')`) to fire the search, not native DOM events.
-5. **Extension reload** — After code changes, user must click Reload in `chrome://extensions`
+8. **Extension reload** — After code changes, user must click Reload in `chrome://extensions`
 
 ## JSON Format (from PTSP Helper)
 ```json

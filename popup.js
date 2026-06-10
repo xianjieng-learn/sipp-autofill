@@ -233,9 +233,11 @@ async function fillAllSipp() {
       : selectedChild ? { ...parsedData, children: [selectedChild] } : parsedData;
 
     if (autoSave) {
-      // Auto-fill all children sequentially with save-and-add between each
+      // Auto-fill all children sequentially with Simpan + reopen between each
+      // Flow: Fill → Simpan (form POST, page reloads, popup closes) → reopen popup → next child
       const children = parsedData.children;
       showStatus(`🔄 Auto-fill ${children.length} anak...`, 'info');
+      let stopped = false;
 
       for (let i = 0; i < children.length; i++) {
         const isLast = i === children.length - 1;
@@ -251,15 +253,42 @@ async function fillAllSipp() {
 
         const res = results?.[0]?.result;
         if (res?.submitted) {
-          // Wait for page to reload after form submission
-          await waitForTabLoad(tab.id, 8000);
-          await new Promise(r => setTimeout(r, 500)); // extra settle time
+          // Form POSTed → page reloads, Data Anak popup closes
+          await waitForTabLoad(tab.id, 10000);
+          await new Promise(r => setTimeout(r, 1500)); // settle time after reload
+
+          // Reopen Data Anak popup for the next child (unless this is the last)
+          if (!isLast) {
+            showStatus(`⏳ Membuka kembali form Data Anak untuk anak ${i + 2}...`, 'info');
+            const reopenRes = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              world: 'MAIN',
+              func: reopenDataAnakPopup,
+            });
+            const reopen = reopenRes?.[0]?.result;
+            if (!reopen?.success) {
+              showStatus(`❌ Gagal buka form Data Anak: ${reopen?.error || 'tombol tidak ditemukan'}. Silakan buka manual, lalu klik Fill lagi.`, 'error');
+              stopped = true;
+              break;
+            }
+            // Wait for popup content to load
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        } else {
+          // Fill failed or button not found
+          const errText = res?.errors?.join('; ') || 'Tidak ada response';
+          if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
+          showStatus(`❌ Gagal mengisi anak ${i + 1}: ${errText}`, 'error');
+          stopped = true;
+          break;
         }
 
         if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
       }
 
-      showStatus(`✅ Berhasil isi ${children.length} anak!`, 'success');
+      if (!stopped) {
+        showStatus(`✅ Berhasil isi ${children.length} anak!`, 'success');
+      }
     } else {
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -334,6 +363,71 @@ btnPaste.addEventListener('click', async () => {
 btnParse.addEventListener('click', parseJSON);
 btnFillAll.addEventListener('click', fillAllSipp);
 if (jsonInput.value.trim()) parseJSON();
+
+/**
+ * Reopen the Data Anak popup on the SIPP case detail page.
+ * After Simpan, the form POSTs and the popup closes. This function finds and clicks
+ * the button/link that reopens the Data Anak input form.
+ *
+ * Injected into SIPP MAIN world via chrome.scripting.executeScript.
+ */
+function reopenDataAnakPopup() {
+  const isVisible = (node) => {
+    if (!node) return false;
+    let el = node;
+    while (el && el !== document) {
+      const s = window.getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+      el = el.parentElement;
+    }
+    return true;
+  };
+
+  // Strategy 1: Find links/buttons with onclick containing popup_form and add_anak
+  for (const el of document.querySelectorAll('a[onclick*="popup_form"], button[onclick*="popup_form"], input[onclick*="popup_form"]')) {
+    const onclick = el.getAttribute('onclick') || '';
+    if (onclick.includes('add_anak') || onclick.includes('addAnak') || onclick.includes('anak_pihak')) {
+      if (isVisible(el)) {
+        el.click();
+        return { success: true, method: 'onclick-popup_form' };
+      }
+    }
+  }
+
+  // Strategy 2: Find links/buttons with text matching "tambah" + "anak"
+  for (const el of document.querySelectorAll('a, button, input[type="button"], input[type="submit"]')) {
+    const text = (el.textContent || el.value || '').toLowerCase().trim();
+    if ((text.includes('tambah') && text.includes('anak')) || text.includes('input data anak')) {
+      if (isVisible(el)) {
+        el.click();
+        return { success: true, method: 'text-match' };
+      }
+    }
+  }
+
+  // Strategy 3: Find links with href containing add_anak or anak_pihak
+  for (const el of document.querySelectorAll('a[href*="add_anak"], a[href*="anak_pihak"], a[href*="addAnak"]')) {
+    if (isVisible(el)) {
+      el.click();
+      return { success: true, method: 'href-match' };
+    }
+  }
+
+  // Strategy 4: Look for popup_form function and call it directly with the add_anak URL
+  if (typeof window.popup_form === 'function') {
+    // Try to find the URL from existing onclick attributes
+    for (const el of document.querySelectorAll('[onclick*="popup_form"]')) {
+      const onclick = el.getAttribute('onclick') || '';
+      const match = onclick.match(/popup_form\(['"]([^'"]*anak[^'"]*)['"]\)/i);
+      if (match) {
+        window.popup_form(match[1]);
+        return { success: true, method: 'popup_form-direct-call' };
+      }
+    }
+  }
+
+  return { success: false, error: 'Tombol "Tambah Data Anak" tidak ditemukan. Pastikan halaman detail perkara terbuka.' };
+}
 
 async function fillSippMainWorld(data) {
   const result = { filledFields: 0, errors: [] };
@@ -898,16 +992,20 @@ async function fillSippMainWorld(data) {
         else if (isDataAnakForm) result.errors.push(`Data Anak ${key}: dropdown tidak ditemukan/tidak cocok.`);
       }
 
-      // Auto-save: click "Simpan dan Tambah Anak" if not the last child
+      // Auto-save: click "Simpan" in the Data Anak form if not the last child
+      // SIPP Data Anak form has only "Simpan" (not "Simpan dan Tambah Anak")
+      // After submit, the popup closes and page reloads — popup.js must reopen it
       if (data.autoSave && !data.isLastChild && isDataAnakForm) {
-        const saveBtn = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"]'))
-          .find(el => /simpan.*tambah/i.test(el.textContent || el.value || ''));
+        const anakForm = document.querySelector('form[action*="addAnakPihak"], #frm_user');
+        const saveBtn = anakForm
+          ? anakForm.querySelector('input[type="submit"], button[type="submit"]')
+          : null;
         if (saveBtn) {
           saveBtn.click();
           result.submitted = true;
-          result.filledFields++; // count the save action
+          result.filledFields++;
         } else {
-          result.errors.push('Auto-save: tombol "Simpan dan Tambah Anak" tidak ditemukan.');
+          result.errors.push('Auto-save: tombol "Simpan" tidak ditemukan di form Data Anak (#frm_user).');
         }
       }
     }
