@@ -1017,9 +1017,13 @@ async function fillSippMainWorld(data) {
           ? anakForm.querySelector('input[type="submit"], button[type="submit"]')
           : null;
         if (saveBtn) {
-          saveBtn.click();
           result.submitted = true;
           result.filledFields++;
+          saveBtn.click();
+          // Return immediately — page will navigate after click,
+          // if we don't return now the result is lost
+          result.success = result.filledFields > 0;
+          return result;
         } else {
           result.errors.push('Auto-save: tombol "Simpan" tidak ditemukan di form Data Anak (#frm_user).');
         }
