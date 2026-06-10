@@ -260,7 +260,23 @@ async function fillAllSipp() {
 
         const res = results?.[0]?.result;
         if (res?.submitted) {
-          // Form POSTed → page reloads, Data Anak popup closes
+          // Fields filled successfully. Now click Simpan via separate injection.
+          showStatus(`⏳ Menyimpan anak ${i + 1}...`, 'info');
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              world: 'MAIN',
+              func: () => {
+                const form = document.querySelector('form[action*="addAnakPihak"], #frm_user');
+                const btn = form ? form.querySelector('input[type="submit"], button[type="submit"]') : null;
+                if (btn) btn.click();
+              },
+            });
+          } catch (_) {
+            // Page navigation may interrupt — that's expected
+          }
+
+          // Wait for page reload after Simpan
           await waitForTabLoad(tab.id, 10000);
           await new Promise(r => setTimeout(r, 1500)); // settle time after reload
 
@@ -1019,11 +1035,8 @@ async function fillSippMainWorld(data) {
         if (saveBtn) {
           result.submitted = true;
           result.filledFields++;
-          saveBtn.click();
-          // Return immediately — page will navigate after click,
-          // if we don't return now the result is lost
-          result.success = result.filledFields > 0;
-          return result;
+          // DO NOT click here — page navigation would destroy the return value.
+          // popup.js will handle the click via a separate script injection.
         } else {
           result.errors.push('Auto-save: tombol "Simpan" tidak ditemukan di form Data Anak (#frm_user).');
         }
