@@ -244,12 +244,19 @@ async function fillAllSipp() {
         const childData = { ...parsedData, children: [children[i]], isLastChild: isLast };
         showStatus(`⏳ Mengisi anak ${i + 1}/${children.length}: ${children[i].nama || ''}...`, 'info');
 
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          world: 'MAIN',
-          func: fillSippMainWorld,
-          args: [childData],
-        });
+        let results;
+        try {
+          results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            world: 'MAIN',
+            func: fillSippMainWorld,
+            args: [childData],
+          });
+        } catch (scriptErr) {
+          showStatus(`❌ Script error anak ${i + 1}: ${scriptErr.message}`, 'error');
+          stopped = true;
+          break;
+        }
 
         const res = results?.[0]?.result;
         if (res?.submitted) {
@@ -276,7 +283,9 @@ async function fillAllSipp() {
           }
         } else {
           // Fill failed or button not found
-          const errText = res?.errors?.join('; ') || 'Tidak ada response';
+          const errText = res?.errors?.length ? res.errors.join('; ')
+            : res === undefined || res === null ? 'Function tidak mengembalikan result (kemungkinan JS error di halaman SIPP)'
+            : 'Tidak ada response';
           if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
           showStatus(`❌ Gagal mengisi anak ${i + 1}: ${errText}`, 'error');
           stopped = true;
@@ -290,12 +299,17 @@ async function fillAllSipp() {
         showStatus(`✅ Berhasil isi ${children.length} anak!`, 'success');
       }
     } else {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',
-        func: fillSippMainWorld,
-        args: [dataForFill],
-      });
+      let results;
+      try {
+        results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: fillSippMainWorld,
+          args: [dataForFill],
+        });
+      } catch (scriptErr) {
+        return showStatus(`❌ Script error: ${scriptErr.message}`, 'error');
+      }
       renderFillResult(results?.[0]?.result || { success: false, errors: ['Tidak ada response dari halaman SIPP'] });
     }
   } catch (e) {
@@ -432,6 +446,8 @@ function reopenDataAnakPopup() {
 async function fillSippMainWorld(data) {
   const result = { filledFields: 0, errors: [] };
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  try {
 
   function isVisible(node) {
     if (!node) return false;
@@ -1013,4 +1029,13 @@ async function fillSippMainWorld(data) {
 
   result.success = result.filledFields > 0;
   return result;
+
+  } catch (e) {
+    // Catch any uncaught JS errors and return them instead of crashing
+    return {
+      filledFields: result.filledFields,
+      errors: [...result.errors, `JS Error: ${e.message || e}`],
+      success: result.filledFields > 0,
+    };
+  }
 }
