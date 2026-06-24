@@ -234,10 +234,23 @@ async function fillAllSipp() {
 
     if (autoSave) {
       // Auto-fill all children sequentially with Simpan + reopen between each
-      // Flow: Fill → Simpan (form POST, page reloads, popup closes) → reopen popup → next child
+      // Flow: Open popup → Fill → Simpan (form POST, page reloads, popup closes) → reopen popup → next child
       const children = parsedData.children;
       showStatus(`🔄 Auto-fill ${children.length} anak...`, 'info');
       let stopped = false;
+
+      // Ensure Data Anak popup is open before we start filling
+      showStatus('⏳ Membuka form Data Anak...', 'info');
+      const initialOpen = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: reopenDataAnakPopup,
+      });
+      if (!initialOpen?.[0]?.result?.success) {
+        showStatus(`❌ ${initialOpen?.[0]?.result?.error || 'Gagal buka form Data Anak'}`, 'error');
+        return;
+      }
+      await new Promise(r => setTimeout(r, 2000)); // wait for popup content to load
 
       for (let i = 0; i < children.length; i++) {
         const isLast = i === children.length - 1;
@@ -259,7 +272,21 @@ async function fillAllSipp() {
         }
 
         const res = results?.[0]?.result;
-        if (res?.submitted) {
+        if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
+
+        // For last child: just fill, don't save (let user review)
+        if (isLast) {
+          if (res?.success) {
+            showStatus(`✅ Anak ${i + 1} (${children[i].nama || ''}) berhasil diisi. Silakan review lalu klik Simpan.`, 'success');
+          } else {
+            const errText = res?.errors?.length ? res.errors.join('; ') : 'Tidak ada response';
+            showStatus(`❌ Gagal mengisi anak ${i + 1}: ${errText}`, 'error');
+            stopped = true;
+          }
+          break;
+        }
+
+        if (res?.submitted || (res?.success && res?.filledFields > 0)) {
           // Fields filled successfully. Now click Simpan via separate injection.
           showStatus(`⏳ Menyimpan anak ${i + 1}...`, 'info');
           try {
@@ -280,35 +307,30 @@ async function fillAllSipp() {
           await waitForTabLoad(tab.id, 10000);
           await new Promise(r => setTimeout(r, 1500)); // settle time after reload
 
-          // Reopen Data Anak popup for the next child (unless this is the last)
-          if (!isLast) {
-            showStatus(`⏳ Membuka kembali form Data Anak untuk anak ${i + 2}...`, 'info');
-            const reopenRes = await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              world: 'MAIN',
-              func: reopenDataAnakPopup,
-            });
-            const reopen = reopenRes?.[0]?.result;
-            if (!reopen?.success) {
-              showStatus(`❌ Gagal buka form Data Anak: ${reopen?.error || 'tombol tidak ditemukan'}. Silakan buka manual, lalu klik Fill lagi.`, 'error');
-              stopped = true;
-              break;
-            }
-            // Wait for popup content to load
-            await new Promise(r => setTimeout(r, 1500));
+          // Reopen Data Anak popup for the next child
+          showStatus(`⏳ Membuka kembali form Data Anak untuk anak ${i + 2}...`, 'info');
+          const reopenRes = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            world: 'MAIN',
+            func: reopenDataAnakPopup,
+          });
+          const reopen = reopenRes?.[0]?.result;
+          if (!reopen?.success) {
+            showStatus(`❌ Gagal buka form Data Anak: ${reopen?.error || 'tombol tidak ditemukan'}. Silakan buka manual, lalu klik Fill lagi.`, 'error');
+            stopped = true;
+            break;
           }
+          // Wait for popup content to load
+          await new Promise(r => setTimeout(r, 2000));
         } else {
           // Fill failed or button not found
           const errText = res?.errors?.length ? res.errors.join('; ')
             : res === undefined || res === null ? 'Function tidak mengembalikan result (kemungkinan JS error di halaman SIPP)'
             : 'Tidak ada response';
-          if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
           showStatus(`❌ Gagal mengisi anak ${i + 1}: ${errText}`, 'error');
           stopped = true;
           break;
         }
-
-        if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
       }
 
       if (!stopped) {
