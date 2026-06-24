@@ -761,6 +761,84 @@ async function fillSippMainWorld(data) {
       document.querySelector('input[role="searchbox"]');
   }
 
+  // Extract kab/kota/provinsi names from text for geographic disambiguation
+  // e.g. "Sukolilo 01, Kabupaten Pati" → ["pati"]
+  // e.g. "KUA Sukolilo Kota Surabaya Provinsi Jawa Timur" → ["surabaya", "timur"]
+  function extractGeoTokens(text) {
+    const n = norm(text);
+    const tokens = [];
+    const re = /\b(?:kabupaten|kab|kota|provinsi|propinsi)\s+(\w+)/gi;
+    let m;
+    while ((m = re.exec(n))) {
+      if (m[1].length > 2) tokens.push(m[1]);
+    }
+    return tokens;
+  }
+
+  // Score a candidate text against wanted, with extra weight for geographic tokens.
+  // Used to disambiguate when multiple KUAs share the same kecamatan name.
+  function scoreKuaMatch(candidateText, wantedText) {
+    const wantedNorm = norm(wantedText);
+    const candidateNorm = norm(candidateText);
+    const wantedClean = cleanKua(wantedText);
+    const candidateClean = cleanKua(candidateText);
+
+    // Exact match gets max score
+    if (candidateNorm === wantedNorm || candidateClean === wantedClean) return 1000;
+
+    let score = 0;
+
+    // Token overlap: count how many wanted tokens appear in candidate
+    const wantedTokens = wantedClean.split(/\s+/).filter(t => t.length > 2);
+    const candidateTokens = candidateClean.split(/\s+/);
+    for (const tok of wantedTokens) {
+      if (candidateTokens.includes(tok)) score += 10;
+    }
+
+    // Geographic tokens from wanted (kab/kota/provinsi names) — heavy weight
+    const wantedGeo = extractGeoTokens(wantedText);
+    for (const geo of wantedGeo) {
+      if (candidateNorm.includes(geo)) score += 50;
+    }
+
+    // Geo MISMATCH penalty: when wanted has geographic qualifiers (e.g. "Kabupaten Brebes")
+    // but this candidate has DIFFERENT geographic qualifiers, heavily penalize it.
+    // This prevents "KUA Larangan, Kota Tangerang" from matching "Larangan, Kabupaten Brebes".
+    if (wantedGeo.length > 0) {
+      const candidateGeo = extractGeoTokens(candidateText);
+      if (candidateGeo.length > 0) {
+        const hasMatchingGeo = wantedGeo.some(wg => candidateGeo.some(cg => cg === wg));
+        if (!hasMatchingGeo) score -= 200;
+      }
+    }
+
+    // Substring matches
+    if (candidateClean.includes(wantedClean) && wantedClean.length > 3) score += 100;
+    if (candidateNorm.includes(wantedNorm) && wantedNorm.length > 3) score += 100;
+
+    return score;
+  }
+
+  // When multiple candidates match, pick the one that best matches wanted text.
+  // This prevents "Sukolilo Kota Surabaya" from winning over "Sukolilo Kab. Pati"
+  // when wanted = "Sukolilo 01, Kabupaten Pati".
+  function pickBestKua(candidates, wantedText) {
+    if (!candidates || candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    let bestScore = -1;
+    let best = candidates[0];
+    for (const c of candidates) {
+      const s = scoreKuaMatch(c.textContent, wantedText);
+      console.log(`[SIPP KUA] pickBest: "${c.textContent.trim()}" score=${s}`);
+      if (s > bestScore) {
+        bestScore = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
   function findKuaResult(wanted, term) {
     const selectors = [
       '#select2-ref_kua-results .select2-results__option',
@@ -781,7 +859,19 @@ async function fillSippMainWorld(data) {
       return text && !text.includes('mencari') && !text.includes('searching') && !text.includes('tidak ditemukan') && !text.includes('no results');
     });
 
-    let match = items.find(el => kuaMatches(el.textContent, wanted)) || items.find(el => kuaMatches(el.textContent, term));
+    // Collect ALL exact wanted matches and pick best — don't just take the first one,
+    // because multiple KUAs can share the same kecamatan name (e.g. "Larangan" in Brebes vs Tangerang)
+    const exactMatches = items.filter(el => kuaMatches(el.textContent, wanted));
+    let match = exactMatches.length > 0 ? pickBestKua(exactMatches, wanted) : null;
+    if (!match) {
+      // When matching by term, collect ALL candidates and pick the BEST one
+      // to avoid wrong picks when multiple KUAs share the same kecamatan name
+      const candidates = items.filter(el => kuaMatches(el.textContent, term));
+      if (candidates.length > 0) {
+        match = pickBestKua(candidates, wanted);
+        console.log(`[SIPP KUA] disambiguated: picked "${match?.textContent?.trim()}" from ${candidates.length} candidates for term="${term}"`);
+      }
+    }
     if (!match) return null;
 
     if (match.classList.contains('select2-result-label')) {
@@ -802,7 +892,8 @@ async function fillSippMainWorld(data) {
 
     const existing = Array.from(select.options || []);
     console.log(`[SIPP KUA] wanted="${wanted}" existing_options=${existing.length}`);
-    const optionFromExisting = existing.find(o => o.value && kuaMatches(o.textContent || o.text, wanted));
+    const matchingExisting = existing.filter(o => o.value && kuaMatches(o.textContent || o.text, wanted));
+    const optionFromExisting = matchingExisting.length > 0 ? pickBestKua(matchingExisting, wanted) : null;
     if (optionFromExisting && selectOption(select, optionFromExisting)) {
       console.log('[SIPP KUA] ✅ matched existing option:', optionFromExisting.textContent);
       return true;
@@ -900,8 +991,24 @@ async function fillSippMainWorld(data) {
           const data = await resp.json();
           // SIPP may return {results: [{id, text}, ...]} (Select2 v4) or plain array
           const items = Array.isArray(data) ? data : (data.results || []);
-          const match = items.find(r => kuaMatches(r.text || r.nama || '', wanted)) ||
-                        items.find(r => kuaMatches(r.text || r.nama || '', term));
+          // Score and pick best match — collect ALL matches, don't take first one
+          const allMatches = items.filter(r => kuaMatches(r.text || r.nama || '', wanted));
+          let match = allMatches.length > 0 ? allMatches.reduce((best, r) => {
+            const s = scoreKuaMatch(r.text || r.nama || '', wanted);
+            const bestS = scoreKuaMatch(best.text || best.nama || '', wanted);
+            return s > bestS ? r : best;
+          }) : null;
+          if (!match) {
+            const candidates = items.filter(r => kuaMatches(r.text || r.nama || '', term));
+            if (candidates.length > 0) {
+              // Pick best by geographic disambiguation
+              let bestScore = -1;
+              for (const c of candidates) {
+                const s = scoreKuaMatch(c.text || c.nama || '', wanted);
+                if (s > bestScore) { bestScore = s; match = c; }
+              }
+            }
+          }
           if (match) {
             const id = match.id || match.value || match.kode;
             const text = match.text || match.nama || '';
@@ -935,8 +1042,22 @@ async function fillSippMainWorld(data) {
                 setTimeout(() => reject(new Error('timeout')), 5000);
               });
               const items = results.results || results || [];
-              const match = items.find(r => kuaMatches(r.text || '', wanted)) ||
-                            items.find(r => kuaMatches(r.text || '', term));
+              const allMatches = items.filter(r => kuaMatches(r.text || '', wanted));
+              let match = allMatches.length > 0 ? allMatches.reduce((best, r) => {
+                const s = scoreKuaMatch(r.text || '', wanted);
+                const bestS = scoreKuaMatch(best.text || '', wanted);
+                return s > bestS ? r : best;
+              }) : null;
+              if (!match) {
+                const candidates = items.filter(r => kuaMatches(r.text || '', term));
+                if (candidates.length > 0) {
+                  let bestScore = -1;
+                  for (const c of candidates) {
+                    const s = scoreKuaMatch(c.text || '', wanted);
+                    if (s > bestScore) { bestScore = s; match = c; }
+                  }
+                }
+              }
               if (match) {
                 const opt = new Option(match.text, match.id, true, true);
                 select.add(opt);
