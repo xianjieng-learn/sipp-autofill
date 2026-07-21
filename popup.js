@@ -75,7 +75,22 @@ function normalizeDate(value) {
 
 function normalizeData(data) {
   const childSource = [data.children, data.anak, data.data_anak, data.child_data].find(Array.isArray) || [];
+  const calonMempelaiSource = [data.calon_mempelai, data.calonMempelai, data.mempelai, data.candidates]
+    .find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
   const marriageSource = data.marriage_info && typeof data.marriage_info === 'object' ? data.marriage_info : {};
+  const isbatSource = data.isbat_info && typeof data.isbat_info === 'object' ? data.isbat_info : {};
+  const caseDetailSource = [data.case_details, data.data_umum, data.additional_fields]
+    .find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+  const detailValue = (...keys) => firstNonEmpty(
+    ...keys.flatMap(key => [caseDetailSource[key], data[key]])
+  );
+  const detailArray = (...keys) => {
+    for (const key of keys) {
+      const value = caseDetailSource[key] ?? data[key];
+      if (Array.isArray(value)) return value.filter(item => item !== undefined && item !== null && String(item).trim() !== '');
+    }
+    return [];
+  };
 
   const tanggalMenikah = firstNonEmpty(
     marriageSource.tanggal_menikah, marriageSource.tgl_nikah, marriageSource.tanggal_nikah,
@@ -96,13 +111,31 @@ function normalizeData(data) {
 
   const kuaDicatat = firstNonEmpty(
     marriageSource.kua_dicatat, marriageSource.kua_tempat_menikah, marriageSource.kua_tempat_nikah,
-    marriageSource.kua_menikah, marriageSource.kua, marriageSource.tempat_menikah,
+    marriageSource.kua_menikah, marriageSource.kua,
     data.kua_dicatat, data.kua_tempat_menikah, data.kua_tempat_nikah, data.kua_menikah,
-    data.kua, data.tempat_menikah
+    data.kua
+  );
+
+  // Isbat Nikah has its own Data Umum fields.  Keep ceremony location apart
+  // from KUA: #tempat_menikah_isbat is free text; #ref_kua is Select2.
+  const alasanIsbat = firstNonEmpty(
+    isbatSource.alasan_isbat, isbatSource.alasan, isbatSource.alasan_pengajuan,
+    data.alasan_isbat, data.alasanIsbat, data.alasan_pengajuan_isbat
+  );
+  const tempatMenikahIsbat = firstNonEmpty(
+    isbatSource.tempat_menikah, isbatSource.tempat,
+    marriageSource.tempat_menikah, marriageSource.tempat_nikah,
+    data.tempat_menikah, data.tempat_nikah
   );
 
   return {
     children: childSource.map(normalizeChild),
+    // Dispensasi Kawin uses one form containing both calon mempelai. Keep
+    // them separate from `children`: SIPP IDs for calon wanita use suffix `2`.
+    calon_mempelai: {
+      pria: normalizeCalonMempelai(calonMempelaiSource.pria || calonMempelaiSource.laki_laki || calonMempelaiSource.lakiLaki || calonMempelaiSource.calon_pria || calonMempelaiSource.calon_mempelai_pria || data.calon_mempelai_pria),
+      wanita: normalizeCalonMempelai(calonMempelaiSource.wanita || calonMempelaiSource.perempuan || calonMempelaiSource.calon_wanita || calonMempelaiSource.calon_mempelai_wanita || data.calon_mempelai_wanita),
+    },
     posita: pickValue(data, ['posita', 'dalil', 'alasan']),
     petitum: pickValue(data, ['petitum', 'tuntutan', 'amar']),
     obyek_sengketa: pickValue(data, ['obyek_sengketa', 'objek_sengketa', 'obyek_gugatan', 'objek_gugatan']) || '-',
@@ -117,6 +150,45 @@ function normalizeData(data) {
       nomor_akta_nikah: nomorAkta,
       kua_dicatat: kuaDicatat,
     },
+    isbat_info: {
+      alasan_isbat: alasanIsbat,
+      // SIPP datepicker requires DD/MM/YYYY; narrative dates are not valid here.
+      tanggal_menikah: normalizeDate(firstNonEmpty(
+        isbatSource.tanggal_menikah, isbatSource.tgl_menikah,
+        data.tanggal_menikah_isbat, data.tgl_menikah_isbat, tanggalMenikah
+      )),
+      tempat_menikah: tempatMenikahIsbat,
+    },
+    case_details: {
+      alasan_poligami: detailValue('alasan_poligami'),
+      penghasilan_poligami: detailValue('penghasilan_poligami'),
+      batal_kawin: detailValue('batal_kawin', 'alasan_pembatalan_kawin'),
+      alasan_kuasa_anak: detailValue('alasan_kuasa_anak', 'alasan_penguasaan_anak'),
+      alasan_sah_anak: detailValue('alasan_sah_anak', 'alasan_pengesahan_anak'),
+      alasan_asalusul: detailValue('alasan_asalusul', 'alasan_asal_usul_anak'),
+      alasan_dispen: detailValue('alasan_dispen', 'alasan_dispensasi_kawin'),
+      objek_wakaf: detailArray('objek_wakaf'),
+      perkara_kumulasi: detailArray('perkara_kumulasi'),
+    },
+  };
+}
+
+function normalizeBoolean(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  return ['1', 'true', 'ya', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function normalizeCalonMempelai(c) {
+  c = c && typeof c === 'object' ? c : {};
+  return {
+    dimohonkan: normalizeBoolean(c.dimohonkan ?? c.dimohonkan_diska ?? c.yang_dimohonkan ?? c.is_dimohonkan),
+    nama: firstNonEmpty(c.nama, c.name, c.nama_lengkap),
+    nik: firstNonEmpty(c.nik, c.NIK),
+    tempat_lahir: firstNonEmpty(c.tempat_lahir, c.tempatLahir, c.tmp_lahir, c.tempat),
+    tanggal_lahir: normalizeDate(firstNonEmpty(c.tanggal_lahir, c.tanggalLahir, c.tgl_lahir, c.tanggal)),
+    pendidikan: firstNonEmpty(c.pendidikan, c.jenis_pendidikan),
+    pekerjaan: firstNonEmpty(c.pekerjaan, c.job),
+    penghasilan: firstNonEmpty(c.penghasilan, c.penghasilan_bulanan, c.penghasilan_per_bulan, c.income),
   };
 }
 
@@ -134,9 +206,28 @@ function normalizeChild(c) {
     tempat_lahir: tempat,
     tanggal_lahir: normalizeDate(tanggal),
     jenis_kelamin: firstNonEmpty(c.jenis_kelamin, c.jenisKelamin, c.jk, c.kelamin),
-    pendidikan: firstNonEmpty(c.pendidikan, c.jenis_pendidikan),
+    // SIPP accepts "Tidak Ada" for a child whose education is not stated.
+    pendidikan: firstNonEmpty(c.pendidikan, c.jenis_pendidikan) || 'Tidak Ada',
     pengasuhan: firstNonEmpty(c.pengasuhan, c.diasuh_oleh, c.diasuhOleh, c.diasuh, c.hadhanah) || 'Penggugat',
   };
+}
+
+// Auto-save must never create a partial child record. `anak_ke` is omitted
+// because SIPP can infer it from existing child records. NIK is optional, and
+// education is normalized to "Tidak Ada"; the other identity fields must be
+// present before an automatic save is allowed.
+function getMissingChildFields(child) {
+  const fields = [
+    ['Nama Anak', child?.nama],
+    ['Tempat Lahir', child?.tempat_lahir],
+    ['Tanggal Lahir', child?.tanggal_lahir],
+    ['Jenis Kelamin', child?.jenis_kelamin],
+    ['Pendidikan', child?.pendidikan],
+    ['Diasuh Oleh', child?.pengasuhan],
+  ];
+  return fields
+    .filter(([, value]) => value === undefined || value === null || String(value).trim() === '')
+    .map(([label]) => label);
 }
 
 function parseJSON() {
@@ -151,7 +242,10 @@ function parseJSON() {
     if (parsedData.children.length) {
       showStatus(`✅ Terdeteksi ${parsedData.children.length} anak. Siap di-fill.`, 'success');
       renderChildren(parsedData.children);
-      document.getElementById('autoSaveRow').style.display = parsedData.children.length > 1 ? 'flex' : 'none';
+      // A single child also needs the automatic save path.  Previously this
+      // toggle was hidden unless there were 2+ children, so the first/only
+      // child could never be saved automatically.
+      document.getElementById('autoSaveRow').style.display = 'flex';
     } else {
       showStatus('✅ Data siap di-fill ke SIPP.', 'success');
       childrenList.innerHTML = '';
@@ -194,6 +288,17 @@ function renderPreview(data) {
     html += '</div>';
   }
 
+  const calon = data.calon_mempelai || {};
+  const calonEntries = [['Calon Pria', calon.pria], ['Calon Wanita', calon.wanita]]
+    .filter(([, value]) => Object.values(value || {}).some(value => value !== '' && value !== null));
+  if (calonEntries.length) {
+    html += '<div class="preview-section"><div class="preview-section-title">💑 Data Calon Mempelai</div>';
+    calonEntries.forEach(([label, value]) => {
+      html += `<div class="preview-field"><span class="preview-label">${label}</span><span class="preview-value" title="${value.nama || ''}">${value.nama || 'Tanpa Nama'}</span></div>`;
+    });
+    html += '</div>';
+  }
+
   if (data.posita) html += `<div class="preview-section"><div class="preview-section-title">📝 Posita</div><div class="preview-field"><span class="preview-label">Panjang</span><span class="preview-value">${data.posita.length} karakter</span></div></div>`;
   if (data.petitum) html += `<div class="preview-section"><div class="preview-section-title">📋 Petitum</div><div class="preview-field"><span class="preview-label">Panjang</span><span class="preview-value">${data.petitum.length} karakter</span></div></div>`;
 
@@ -205,6 +310,19 @@ function renderPreview(data) {
       ['Tanggal Dicatat', mi.tanggal_dicatat],
       ['No. Akta Nikah', mi.nomor_akta_nikah],
       ['KUA Tempat Menikah', mi.kua_dicatat],
+    ].forEach(([label, value]) => {
+      if (value) html += `<div class="preview-field"><span class="preview-label">${label}</span><span class="preview-value" title="${value}">${value}</span></div>`;
+    });
+    html += '</div>';
+  }
+
+  const isbat = data.isbat_info || {};
+  if (Object.values(isbat).some(Boolean)) {
+    html += '<div class="preview-section"><div class="preview-section-title">🕌 Data Isbat Nikah</div>';
+    [
+      ['Alasan Isbat', isbat.alasan_isbat],
+      ['Tanggal Menikah', isbat.tanggal_menikah],
+      ['Tempat Menikah', isbat.tempat_menikah],
     ].forEach(([label, value]) => {
       if (value) html += `<div class="preview-field"><span class="preview-label">${label}</span><span class="preview-value" title="${value}">${value}</span></div>`;
     });
@@ -227,7 +345,7 @@ async function fillAllSipp() {
     const isSippPage = tab && ['ecourt.mahkamahagung.go.id', '25.24.23.7'].some(host => tab.url.includes(host));
     if (!isSippPage) return showStatus('❌ Buka halaman SIPP/eCourt dulu.', 'error');
 
-    const autoSave = document.getElementById('autoSaveToggle')?.checked && parsedData?.children?.length > 1;
+    const autoSave = Boolean(document.getElementById('autoSaveToggle')?.checked && parsedData?.children?.length);
     const dataForFill = autoSave
       ? { ...parsedData, autoSave: true }
       : selectedChild ? { ...parsedData, children: [selectedChild] } : parsedData;
@@ -250,11 +368,25 @@ async function fillAllSipp() {
         showStatus(`❌ ${initialOpen?.[0]?.result?.error || 'Gagal buka form Data Anak'}`, 'error');
         return;
       }
-      await new Promise(r => setTimeout(r, 2000)); // wait for popup content to load
+      const initialForm = await waitForDataAnakForm(tab.id);
+      if (!initialForm.success) {
+        showStatus(`❌ ${initialForm.error}`, 'error');
+        return;
+      }
 
       for (let i = 0; i < children.length; i++) {
         const isLast = i === children.length - 1;
-        const childData = { ...parsedData, children: [children[i]], isLastChild: isLast };
+        const missingFields = getMissingChildFields(children[i]);
+        if (missingFields.length) {
+          const message = `Anak ${i + 1} (${children[i].nama || 'tanpa nama'}) dihentikan — data kosong: ${missingFields.join(', ')}. Data anak ini tidak disimpan dan proses tidak lanjut ke anak berikutnya.`;
+          showStatus(`⚠️ ${message}`, 'error');
+          renderErrorDetails([message]);
+          stopped = true;
+          break;
+        }
+        // The injected fill function marks a submit as ready only when
+        // autoSave is present. Keep it true for EVERY child, including last.
+        const childData = { ...parsedData, children: [children[i]], autoSave: true, isLastChild: false };
         showStatus(`⏳ Mengisi anak ${i + 1}/${children.length}: ${children[i].nama || ''}...`, 'info');
 
         let results;
@@ -274,38 +406,31 @@ async function fillAllSipp() {
         const res = results?.[0]?.result;
         if (i === 0) renderFillResult(res || { success: false, errors: ['Tidak ada response'] });
 
-        // For last child: just fill, don't save (let user review)
-        if (isLast) {
-          if (res?.success) {
-            showStatus(`✅ Anak ${i + 1} (${children[i].nama || ''}) berhasil diisi. Silakan review lalu klik Simpan.`, 'success');
-          } else {
-            const errText = res?.errors?.length ? res.errors.join('; ') : 'Tidak ada response';
-            showStatus(`❌ Gagal mengisi anak ${i + 1}: ${errText}`, 'error');
-            stopped = true;
-          }
+        // A missing or mismatched field in the SIPP form is a hard stop too.
+        // Never save a partly populated child merely because other fields filled.
+        if (res?.errors?.length) {
+          const message = `Anak ${i + 1} belum disimpan: ${res.errors.join('; ')}`;
+          showStatus(`⚠️ ${message}`, 'error');
+          renderErrorDetails([message]);
+          stopped = true;
           break;
         }
 
         if (res?.submitted || (res?.success && res?.filledFields > 0)) {
-          // Fields filled successfully. Now click Simpan via separate injection.
+          // Register the navigation watcher BEFORE clicking Simpan. The old
+          // implementation watched afterwards, so it often missed the fast
+          // SIPP POST/reload and falsely continued while the form was still open.
           showStatus(`⏳ Menyimpan anak ${i + 1}...`, 'info');
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              world: 'MAIN',
-              func: () => {
-                const form = document.querySelector('form[action*="addAnakPihak"], #frm_user');
-                const btn = form ? form.querySelector('input[type="submit"], button[type="submit"]') : null;
-                if (btn) btn.click();
-              },
-            });
-          } catch (_) {
-            // Page navigation may interrupt — that's expected
+          const saved = await submitDataAnak(tab.id);
+          if (!saved.success) {
+            showStatus(`❌ Anak ${i + 1} belum tersimpan: ${saved.error}`, 'error');
+            stopped = true;
+            break;
           }
-
-          // Wait for page reload after Simpan
-          await waitForTabLoad(tab.id, 10000);
-          await new Promise(r => setTimeout(r, 1500)); // settle time after reload
+          if (isLast) {
+            showStatus(`✅ Anak ${i + 1}/${children.length} sudah tersimpan.`, 'success');
+            break;
+          }
 
           // Reopen Data Anak popup for the next child
           showStatus(`⏳ Membuka kembali form Data Anak untuk anak ${i + 2}...`, 'info');
@@ -320,8 +445,12 @@ async function fillAllSipp() {
             stopped = true;
             break;
           }
-          // Wait for popup content to load
-          await new Promise(r => setTimeout(r, 2000));
+          const nextForm = await waitForDataAnakForm(tab.id);
+          if (!nextForm.success) {
+            showStatus(`❌ Anak ${i + 2} belum bisa dibuka: ${nextForm.error}`, 'error');
+            stopped = true;
+            break;
+          }
         } else {
           // Fill failed or button not found
           const errText = res?.errors?.length ? res.errors.join('; ')
@@ -358,20 +487,68 @@ async function fillAllSipp() {
   }
 }
 
-function waitForTabLoad(tabId, timeout = 8000) {
+async function waitForDataAnakForm(tabId, timeout = 10000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId }, world: 'MAIN',
+        func: () => {
+          const form = document.querySelector('form[action*="addAnakPihak" i], form[action*="add_anak" i], #frm_user');
+          if (!form) return false;
+          const style = window.getComputedStyle(form);
+          return style.display !== 'none' && style.visibility !== 'hidden';
+        },
+      });
+      if (result) return { success: true };
+    } catch (_) { /* page can be navigating; retry */ }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return { success: false, error: 'Form Data Anak tidak muncul dalam 10 detik.' };
+}
+
+function submitDataAnak(tabId, timeout = 12000) {
   return new Promise(resolve => {
     let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(value);
+    };
     const listener = (id, info) => {
-      if (id === tabId && info.status === 'complete' && !done) {
-        done = true;
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+      if (id === tabId && info.status === 'complete') finish({ success: true });
     };
     chrome.tabs.onUpdated.addListener(listener);
-    setTimeout(() => {
-      if (!done) { done = true; chrome.tabs.onUpdated.removeListener(listener); resolve(); }
-    }, timeout);
+    const timer = setTimeout(() => finish({ success: false, error: 'SIPP tidak memuat ulang setelah tombol Simpan diklik. Periksa pesan validasi di form.' }), timeout);
+
+    chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN',
+      func: () => {
+        const form = document.querySelector('form[action*="addAnakPihak" i], form[action*="add_anak" i], #frm_user');
+        const btn = form?.querySelector('input[type="submit"], button[type="submit"]');
+        if (!btn) return { clicked: false, error: 'Tombol Simpan tidak ditemukan pada form Data Anak.' };
+        if (btn.disabled) return { clicked: false, error: 'Tombol Simpan sedang nonaktif.' };
+        // SIPP displays the native browser confirmation: "Apakah Anda Yakin
+        // Akan Menyimpan Data". It is synchronous within the click handler,
+        // so temporarily approving confirm() lets the auto-save flow proceed
+        // without leaving a native dialog that blocks the next child.
+        const originalConfirm = window.confirm;
+        try {
+          window.confirm = () => true;
+          btn.click();
+          return { clicked: true, confirmation: 'approved' };
+        } finally {
+          window.confirm = originalConfirm;
+        }
+      },
+    }).then(([{ result }]) => {
+      if (!result?.clicked) finish({ success: false, error: result?.error || 'Tombol Simpan tidak dapat diklik.' });
+    }).catch(() => {
+      // A navigation can abort script delivery. The registered tab listener
+      // decides success; otherwise the timeout reports a useful validation error.
+    });
   });
 }
 
@@ -435,10 +612,14 @@ function reopenDataAnakPopup() {
     return true;
   };
 
-  // Strategy 1: Find links/buttons with onclick containing popup_form and add_anak
+  // Strategy 1: only click an explicit ADD action. Never match generic
+  // "anak_pihak" routes: SIPP's Hapus Anak link shares that text and the
+  // previous broad selector could click it while preparing the next child.
   for (const el of document.querySelectorAll('a[onclick*="popup_form"], button[onclick*="popup_form"], input[onclick*="popup_form"]')) {
     const onclick = el.getAttribute('onclick') || '';
-    if (onclick.includes('add_anak') || onclick.includes('addAnak') || onclick.includes('anak_pihak')) {
+    const isAddAction = /add_anak|addAnak|addAnakPihak/i.test(onclick);
+    const isDestructiveAction = /hapus|delete|remove|edit/i.test(onclick);
+    if (isAddAction && !isDestructiveAction) {
       if (isVisible(el)) {
         el.click();
         return { success: true, method: 'onclick-popup_form' };
@@ -457,8 +638,9 @@ function reopenDataAnakPopup() {
     }
   }
 
-  // Strategy 3: Find links with href containing add_anak or anak_pihak
-  for (const el of document.querySelectorAll('a[href*="add_anak"], a[href*="anak_pihak"], a[href*="addAnak"]')) {
+  // Strategy 3: href must explicitly be an add action, never the generic
+  // anak_pihak route that is also used by delete/edit links.
+  for (const el of document.querySelectorAll('a[href*="add_anak" i], a[href*="addAnak" i], a[href*="addAnakPihak" i]')) {
     if (isVisible(el)) {
       el.click();
       return { success: true, method: 'href-match' };
@@ -470,7 +652,7 @@ function reopenDataAnakPopup() {
     // Try to find the URL from existing onclick attributes
     for (const el of document.querySelectorAll('[onclick*="popup_form"]')) {
       const onclick = el.getAttribute('onclick') || '';
-      const match = onclick.match(/popup_form\(['"]([^'"]*anak[^'"]*)['"]\)/i);
+      const match = onclick.match(/popup_form\(['"]([^'"]*(?:add_anak|addAnak|addAnakPihak)[^'"]*)['"]\)/i);
       if (match) {
         window.popup_form(match[1]);
         return { success: true, method: 'popup_form-direct-call' };
@@ -499,6 +681,8 @@ async function fillSippMainWorld(data) {
   }
 
   const isDataAnakForm = isVisible(document.querySelector('form[action*="addAnakPihak"], #frm_user'));
+  const isCalonMempelaiForm = isVisible(document.querySelector('#nama2, input[name="nama2" i]')) &&
+    /input calon mempelai/i.test(document.body?.textContent || '');
 
   function setVal(el, value) {
     if (!el || value === undefined || value === null || String(value).trim() === '') return false;
@@ -526,6 +710,17 @@ async function fillSippMainWorld(data) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;
+  }
+
+  function setCheckbox(el, checked) {
+    if (!el || typeof checked !== 'boolean') return false;
+    el.checked = checked;
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(el).prop('checked', checked).trigger('change'); } catch (_) {}
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return el.checked === checked;
   }
 
   function norm(s) {
@@ -670,6 +865,30 @@ async function fillSippMainWorld(data) {
       return t === wanted || t.includes(wanted) || wanted.includes(t) || compact(t).includes(compact(wanted)) || compact(wanted).includes(compact(t));
     });
     return selectOption(select, option);
+  }
+
+  function setMultiSelect(select, values) {
+    if (!select || !Array.isArray(values) || values.length === 0) return false;
+    const wanted = new Set(values.map(value => String(value).trim()).filter(Boolean));
+    const options = Array.from(select.options || []);
+    let selectedCount = 0;
+    options.forEach(option => {
+      const text = norm(option.textContent || option.text);
+      const match = wanted.has(String(option.value)) ||
+        Array.from(wanted).some(value => {
+          const valueNorm = norm(value);
+          return text === valueNorm || text.includes(valueNorm) || valueNorm.includes(text);
+        });
+      option.selected = match;
+      if (match) selectedCount++;
+    });
+    if (!selectedCount) return false;
+    if (typeof jQuery !== 'undefined') {
+      try { jQuery(select).trigger('change').trigger('input').trigger('blur'); } catch (_) {}
+    }
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
   }
 
   function textToHtml(text) {
@@ -1097,7 +1316,7 @@ async function fillSippMainWorld(data) {
     return false;
   }
 
-  if (!isDataAnakForm) {
+  if (!isDataAnakForm && !isCalonMempelaiForm) {
     if (data.tanggal_surat) {
       const el = document.getElementById('tgl_surat');
       if (el && setVal(el, data.tanggal_surat)) result.filledFields++;
@@ -1105,19 +1324,70 @@ async function fillSippMainWorld(data) {
     }
 
     const mi = data.marriage_info || {};
+    const isbat = data.isbat_info || {};
+    const klasifikasi = document.getElementById('klasifikasi');
+    const isIsbatNikah = klasifikasi?.value === '360' || isVisible(document.getElementById('alasan_isbat'));
+
+    if (isIsbatNikah) {
+      if (isbat.alasan_isbat) {
+        const el = document.getElementById('alasan_isbat');
+        if (el && setSelect(el, isbat.alasan_isbat)) result.filledFields++;
+        else result.errors.push('Alasan Pengajuan Isbat Nikah: #alasan_isbat tidak ditemukan/tidak cocok.');
+      }
+      if (isbat.tanggal_menikah) {
+        const el = document.getElementById('tgl_menikah_isbat');
+        if (el && setVal(el, isbat.tanggal_menikah)) result.filledFields++;
+        else result.errors.push('Tanggal Menikah Isbat: #tgl_menikah_isbat tidak ditemukan.');
+      }
+      if (isbat.tempat_menikah) {
+        const el = document.getElementById('tempat_menikah_isbat');
+        if (el && setVal(el, isbat.tempat_menikah)) result.filledFields++;
+        else result.errors.push('Tempat Menikah Isbat: #tempat_menikah_isbat tidak ditemukan.');
+      }
+    } else {
+      for (const [label, id, value] of [
+        ['Tanggal Menikah', 'tgl_nikah', mi.tanggal_menikah],
+        ['Tanggal Kutipan Akta Nikah', 'tgl_kutipan_akta_nikah', mi.tanggal_dicatat],
+        ['Nomor Kutipan Akta Nikah', 'no_kutipan_akta_nikah', mi.nomor_akta_nikah],
+      ]) {
+        if (!value) continue;
+        const el = document.getElementById(id);
+        if (el && setVal(el, value)) result.filledFields++;
+        else result.errors.push(`${label}: #${id} tidak ditemukan.`);
+      }
+
+      if (mi.kua_dicatat) {
+        if (await fillKua(mi.kua_dicatat)) result.filledFields++;
+      }
+    }
+
+    const details = data.case_details || {};
     for (const [label, id, value] of [
-      ['Tanggal Menikah', 'tgl_nikah', mi.tanggal_menikah],
-      ['Tanggal Kutipan Akta Nikah', 'tgl_kutipan_akta_nikah', mi.tanggal_dicatat],
-      ['Nomor Kutipan Akta Nikah', 'no_kutipan_akta_nikah', mi.nomor_akta_nikah],
+      ['Alasan Pengajuan Poligami', 'alasan_poligami', details.alasan_poligami],
+      ['Penghasilan Pemohon Poligami', 'penghasilan', details.penghasilan_poligami],
+      ['Alasan Pembatalan Kawin', 'batal_kawin', details.batal_kawin],
+      ['Alasan Penguasaan Anak', 'alasan_kuasa_anak', details.alasan_kuasa_anak],
+      ['Alasan Pengesahan Anak', 'alasan_sah_anak', details.alasan_sah_anak],
+      ['Alasan Asal Usul Anak', 'alasan_asalusul', details.alasan_asalusul],
+      ['Alasan Dispensasi Kawin', 'alasan_dispen', details.alasan_dispen],
     ]) {
       if (!value) continue;
       const el = document.getElementById(id);
-      if (el && setVal(el, value)) result.filledFields++;
-      else result.errors.push(`${label}: #${id} tidak ditemukan.`);
+      if (!el || !isVisible(el)) continue;
+      const filled = el.tagName === 'SELECT' ? setSelect(el, value) : setVal(el, value);
+      if (filled) result.filledFields++;
+      else result.errors.push(`${label}: #${id} tidak ditemukan/tidak cocok.`);
     }
 
-    if (mi.kua_dicatat) {
-      if (await fillKua(mi.kua_dicatat)) result.filledFields++;
+    for (const [label, id, values] of [
+      ['Objek Wakaf', 'multiselect3', details.objek_wakaf],
+      ['Perkara Kumulasi', 'multiselect', details.perkara_kumulasi],
+    ]) {
+      if (!values?.length) continue;
+      const el = document.getElementById(id);
+      if (!el || !isVisible(el)) continue;
+      if (setMultiSelect(el, values)) result.filledFields++;
+      else result.errors.push(`${label}: #${id} tidak ditemukan/tidak cocok.`);
     }
 
     if (data.obyek_sengketa) {
@@ -1138,6 +1408,46 @@ async function fillSippMainWorld(data) {
       for (let i = 0; i < 3 && !ok; i++) { ok = fillEditor('petitum', data.petitum); if (!ok) await delay(300); }
       if (ok) result.filledFields++;
       else result.errors.push('Petitum: CKEditor/textarea #petitum tidak ditemukan.');
+    }
+  }
+
+  if (isCalonMempelaiForm) {
+    const calon = data.calon_mempelai || {};
+    const rows = [
+      ['Calon Mempelai Pria', calon.pria || {}, ''],
+      ['Calon Mempelai Wanita', calon.wanita || {}, '2'],
+    ];
+    for (const [label, person, suffix] of rows) {
+      if (!Object.values(person).some(value => value !== '' && value !== null)) continue;
+
+      if (person.dimohonkan !== null) {
+        const el = document.getElementById(`dimohonkan${suffix}`);
+        if (setCheckbox(el, person.dimohonkan)) result.filledFields++;
+        else result.errors.push(`${label}: checkbox Yang Dimohonkan DisKa tidak ditemukan.`);
+      }
+
+      for (const [field, value, selector] of [
+        ['Nama', person.nama, `#nama${suffix}, input[name="nama${suffix}" i]`],
+        ['NIK', person.nik, `#nik${suffix}, input[name="nik${suffix}" i]`],
+        ['Tempat Lahir', person.tempat_lahir, `#tempat_lahir${suffix}, input[name="tempat_lahir${suffix}" i]`],
+        ['Tanggal Lahir', person.tanggal_lahir, `input[name="tgl_lahir${suffix}" i], #tgl_lahir${suffix}`],
+        ['Penghasilan/bulan', person.penghasilan, `#penghasilan${suffix}, input[name="penghasilan${suffix}" i]`],
+      ]) {
+        if (!value) continue;
+        const el = document.querySelector(selector);
+        if (el && setVal(el, value)) result.filledFields++;
+        else result.errors.push(`${label} ${field}: field tidak ditemukan.`);
+      }
+
+      for (const [field, value, selector] of [
+        ['Pendidikan', person.pendidikan, `#pendidikan${suffix}, select[name="pendidikan${suffix}" i]`],
+        ['Pekerjaan', person.pekerjaan, `#pekerjaan${suffix}, select[name="pekerjaan${suffix}" i]`],
+      ]) {
+        if (!value) continue;
+        const el = document.querySelector(selector);
+        if (el && setSelect(el, value)) result.filledFields++;
+        else result.errors.push(`${label} ${field}: dropdown tidak ditemukan/tidak cocok.`);
+      }
     }
   }
 

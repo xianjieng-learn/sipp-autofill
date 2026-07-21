@@ -9,6 +9,8 @@ Auto-fill form SIPP (Data Anak, Posita, Petitum) dari hasil ekstraksi PTSP Helpe
 - **Auto-fill Posita**: Isi otomatis kolom Posita
 - **Auto-fill Petitum**: Isi otomatis kolom Petitum
 - **Auto-fill Obyek Sengketa**: Selalu isi "-" (sesuai standar PTSP)
+- **Data Umum bersyarat**: Isbat Nikah, Poligami, Pembatalan Kawin, Penguasaan Anak, Pengesahan Anak, Asal Usul Anak, Dispensasi Kawin, Wakaf, dan Perkara Kumulasi
+- **Data Calon Mempelai Dispensasi Kawin**: Isi calon pria dan wanita pada form `Input Calon Mempelai` (identitas, pendidikan, pekerjaan, penghasilan, dan penanda yang dimohonkan DisKa)
 
 ## Cara Install
 
@@ -69,6 +71,33 @@ Klik icon puzzle piece (🧩) di toolbar Chrome → cari "SIPP AutoFill" → kli
 | Posita | `posita` |
 | Petitum | `petitum` |
 | Obyek Sengketa | Selalu "-" |
+
+### Data Umum Bersyarat
+
+Pilih dulu klasifikasi perkaranya di SIPP, kemudian payload berikut dapat diisi dari JSON. Field yang tidak relevan atau sedang tersembunyi tidak disentuh.
+
+```json
+{
+  "isbat_info": {
+    "alasan_isbat": "4",
+    "tanggal_menikah": "26/03/2020",
+    "tempat_menikah": "wilayah hukum KUA Kecamatan Duren Sawit"
+  },
+  "case_details": {
+    "alasan_kuasa_anak": "2",
+    "alasan_poligami": "1",
+    "penghasilan_poligami": "5000000",
+    "batal_kawin": "4",
+    "alasan_sah_anak": "1",
+    "alasan_asalusul": "1",
+    "alasan_dispen": "4",
+    "objek_wakaf": ["1", "5"],
+    "perkara_kumulasi": ["352"]
+  }
+}
+```
+
+Semua tanggal input SIPP, termasuk Isbat Nikah, wajib format **DD/MM/YYYY**.
 
 ## Troubleshooting
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SIPP AutoFill - PTSP Helper",
-  "version": "1.0.0",
+  "version": "1.0.9",
   "description": "Auto-fill form SIPP (Data Anak, Posita, Petitum) dari hasil ekstraksi PTSP Helper",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["*://ecourt.mahkamahagung.go.id/*", "*://25.24.23.7/*"],
